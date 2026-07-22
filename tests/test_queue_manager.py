@@ -83,6 +83,23 @@ def test_next_pending_and_clear_finished(tmp_path: Path) -> None:
     assert len(qm.jobs()) == 1
 
 
+def test_retry_finished_requeues_failed_and_cancelled(tmp_path: Path) -> None:
+    qm = make_qm(tmp_path)
+    a = qm.add(Job(plugin="A"))
+    b = qm.add(Job(plugin="B"))
+    c = qm.add(Job(plugin="C"))
+    qm.update(a.id, status=JobStatus.FAILED, error="boom", progress=0.3)
+    qm.update(b.id, status=JobStatus.CANCELLED)
+    qm.update(c.id, status=JobStatus.COMPLETED)
+    assert qm.retry_finished() == 2
+    assert qm.get(a.id).status == JobStatus.PENDING
+    assert qm.get(a.id).error == ""
+    assert qm.get(a.id).progress == 0.0
+    assert qm.get(b.id).status == JobStatus.PENDING
+    assert qm.get(c.id).status == JobStatus.COMPLETED
+    assert qm.retry_finished() == 0
+
+
 def test_concurrent_adds_are_safe(tmp_path: Path) -> None:
     qm = make_qm(tmp_path)
 

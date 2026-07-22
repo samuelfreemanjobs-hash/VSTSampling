@@ -173,6 +173,22 @@ class QueueManager:
                     job.status = JobStatus.CANCELLED
         self._notify()
 
+    def retry_finished(self) -> int:
+        """Re-queue failed and cancelled jobs. Returns how many were reset."""
+        retryable = {JobStatus.FAILED, JobStatus.CANCELLED}
+        n = 0
+        with self._lock:
+            for job in self._jobs:
+                if job.status in retryable:
+                    job.status = JobStatus.PENDING
+                    job.progress = 0.0
+                    job.error = ""
+                    job.message = ""
+                    n += 1
+        if n:
+            self._notify()
+        return n
+
     def reset_run_flags(self) -> None:
         self.pause_event.clear()
         self.cancel_event.clear()

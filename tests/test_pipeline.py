@@ -108,6 +108,32 @@ def test_full_pipeline(tmp_path: Path) -> None:
     assert "- Completed: 1" in report.read_text()
 
 
+def test_fxchain_override_reaches_render_job(tmp_path: Path) -> None:
+    config = build_config(tmp_path)
+    queue = QueueManager(save_path=tmp_path / "queue.json")
+    db = Database()
+    seen: dict = {}
+
+    def capturing_render(render_job: RenderJob, plan: NotePlan) -> Path:
+        seen["fxchain"] = render_job.fxchain
+        return fake_render(render_job, plan)
+
+    queue.add(
+        Job(
+            plugin="FakeSynth",
+            preset="Custom",
+            settings_override={"fxchain": "C:/chains/warm.RfxChain"},
+        )
+    )
+    runner = PipelineRunner(
+        queue, config, db=db, render_fn=capturing_render,
+        output_root=Path(config.get("output_dir")),
+    )
+    runner.start()
+    runner.join(timeout=60)
+    assert seen["fxchain"] == "C:/chains/warm.RfxChain"
+
+
 def test_pipeline_records_failure(tmp_path: Path) -> None:
     config = build_config(tmp_path)
     queue = QueueManager(save_path=tmp_path / "queue.json")

@@ -1,6 +1,9 @@
 """Queue view — job list with add/remove/reorder/pause/resume controls."""
 from __future__ import annotations
 
+from pathlib import Path
+from tkinter import filedialog
+
 import customtkinter as ctk
 
 from core.queue_manager import Job, JobStatus
@@ -77,7 +80,82 @@ class QueueView(ctk.CTkFrame):
             row,
             text="Quick test (4 tiny samples, ~1 min — use this to verify setup first)",
         )
-        self.quick_test.grid(row=1, column=0, columnspan=3, pady=(6, 0), sticky="w")
+        self.quick_test.grid(row=1, column=0, columnspan=2, pady=(6, 0), sticky="w")
+
+        # Optional saved Reaper FX chain — captures a fully dialed-in sound,
+        # needed for plugins whose presets Reaper can't select by name.
+        self._fxchain: str = ""
+        self.fxchain_btn = ctk.CTkButton(
+            row, text="FX Chain…", width=100, command=self._pick_fxchain
+        )
+        self.fxchain_btn.grid(row=1, column=2, pady=(6, 0), sticky="e")
+        ctk.CTkButton(row, text="Batch Add…", width=100, command=self._open_batch_add).grid(
+            row=1, column=3, padx=(6, 0), pady=(6, 0)
+        )
+
+    def _pick_fxchain(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Choose a Reaper FX chain",
+            filetypes=[("Reaper FX chain", "*.RfxChain"), ("All files", "*.*")],
+        )
+        if path:
+            self._fxchain = path
+            self.fxchain_btn.configure(text=f"FX: {Path(path).stem[:12]}")
+            self.app.set_status(f"Jobs will load FX chain {Path(path).name}")
+        else:
+            self._fxchain = ""
+            self.fxchain_btn.configure(text="FX Chain…")
+
+    def _open_batch_add(self) -> None:
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Batch Add Presets")
+        dialog.geometry("460x420")
+        dialog.grab_set()
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            dialog,
+            text="One preset name per line. Each line becomes a job for the\n"
+            "plugin and bank currently selected above.",
+            justify="left",
+        ).grid(row=0, column=0, padx=16, pady=(16, 8), sticky="w")
+
+        textbox = ctk.CTkTextbox(dialog)
+        textbox.grid(row=1, column=0, padx=16, pady=8, sticky="nsew")
+
+        def add_all() -> None:
+            plugin = self.plugin_entry.get().strip()
+            if not plugin or plugin.startswith("("):
+                self.app.set_status("Pick a plugin first")
+                return
+            names = [
+                line.strip()
+                for line in textbox.get("1.0", "end").splitlines()
+                if line.strip()
+            ]
+            override = self._current_override()
+            for name in names:
+                self.queue.add(
+                    Job(
+                        plugin=plugin,
+                        bank=self.bank_entry.get().strip(),
+                        preset=name,
+                        settings_override=dict(override),
+                    )
+                )
+            self.app.set_status(f"Queued {len(names)} job(s)")
+            dialog.destroy()
+
+        ctk.CTkButton(dialog, text="Add All", command=add_all).grid(
+            row=2, column=0, padx=16, pady=(8, 16), sticky="e"
+        )
+
+    def _current_override(self) -> dict:
+        override: dict = dict(QUICK_TEST_OVERRIDE) if self.quick_test.get() else {}
+        if self._fxchain:
+            override["fxchain"] = self._fxchain
+        return override
 
     def _build_controls(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent")
@@ -91,6 +169,9 @@ class QueueView(ctk.CTkFrame):
             side="left", padx=6
         )
         ctk.CTkButton(bar, text="Clear Finished", width=110, command=self.queue.clear_finished).pack(
+            side="left", padx=6
+        )
+        ctk.CTkButton(bar, text="Retry Failed", width=100, command=self._retry).pack(
             side="left", padx=6
         )
         ctk.CTkButton(bar, text="▲", width=36, command=lambda: self._move(-1)).pack(
@@ -112,7 +193,7 @@ class QueueView(ctk.CTkFrame):
         if not plugin or plugin.startswith("("):
             self.app.set_status("Plugin name is required")
             return
-        override = dict(QUICK_TEST_OVERRIDE) if self.quick_test.get() else {}
+        override = self._current_override()
         self.queue.add(
             Job(
                 plugin=plugin,
@@ -141,6 +222,10 @@ class QueueView(ctk.CTkFrame):
         if self._selected_id:
             self.queue.remove(self._selected_id)
             self._selected_id = None
+
+    def _retry(self) -> None:
+        n = self.queue.retry_finished()
+        self.app.set_status(f"Re-queued {n} job(s)" if n else "Nothing to retry")
 
     def _save(self) -> None:
         path = self.queue.save()

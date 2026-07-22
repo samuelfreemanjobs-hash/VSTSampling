@@ -108,6 +108,7 @@ class PipelineRunner:
             "normalize_target_db": cfg.get("audio.normalize_target_db", -3.0),
             "loop_detection": cfg.get("audio.loop_detection", True),
             "exporters": cfg.get("exporters", {"mpc_xpm": True}),
+            "fxchain": "",
         }
         s.update(job.settings_override or {})
         return s
@@ -151,6 +152,7 @@ class PipelineRunner:
                 sample_rate=s["sample_rate"],
                 bit_depth=s["bit_depth"],
                 channels=s["channels"],
+                fxchain=s["fxchain"],
             )
             if self._render_fn is not None:
                 ctrl = ReaperController(work_dir=out_dir)
