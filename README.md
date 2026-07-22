@@ -4,20 +4,26 @@ Automated multisampling pipeline: **Reaper** renders VST presets, **Python** pro
 
 ## Status
 
-**v0.1 — desktop shell.** Navigation, settings snapshot, empty views. No rendering yet.
+**v1.0** — full pipeline implemented and unit/integration tested (43 tests).
+The Reaper render step and MPC XPM import need validation on a machine with
+Reaper, real VSTs, and MPC Software installed — see
+[docs/USAGE.md](docs/USAGE.md) for the checklist.
 
-## Roadmap
+## Feature summary
 
-| Version | Goal                                                    |
-| ------- | ------------------------------------------------------- |
-| v0.1    | Desktop GUI shell with navigation and settings          |
-| v0.2    | Queue manager and editable project configuration        |
-| v0.3    | Reaper integration and MIDI generator                   |
-| v0.4    | Automated rendering and WAV processing                  |
-| v0.5    | Metadata, reporting, and SQLite database                |
-| v0.6    | MPC XPM keygroup export                                 |
-| v0.7    | Batch processing of complete preset banks               |
-| v1.0    | PyInstaller installer and documentation                 |
+- **Queue** — thread-safe job queue with reorder, pause/resume, cancel,
+  JSON persistence, and crash-resume.
+- **MIDI generation** — note range × velocity layers × round robins laid on
+  one deterministic timeline; dependency-free SMF writer + JSON slice map.
+- **Headless Reaper rendering** — `render_job.lua` loads the VSTi (or an
+  `.RfxChain`), inserts the MIDI, renders the time selection; Python
+  controller supervises with timeout.
+- **Audio engine** — slicing, silence trim, peak normalize, mono fold,
+  resample, autocorrelation loop detection, clip/quiet/silent QC.
+- **Catalog** — SQLite for plugins/banks/presets/runs/samples/exports;
+  `instrument.json` + `samples.csv` per instrument; Markdown batch reports.
+- **Exporters** — MPC `.xpm` (128-keygroup/4-layer limits enforced), SFZ
+  (loops + round robins), DecentSampler `.dspreset`, Kontakt via SFZ import.
 
 ## Requirements
 
