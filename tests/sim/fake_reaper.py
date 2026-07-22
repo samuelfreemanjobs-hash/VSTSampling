@@ -105,6 +105,29 @@ def build_reaper_api(lua: LuaRuntime, state: State):
     def GetActiveTake(item):
         return item
 
+    def AddMediaItemToTrack(_track):
+        return {"start": 0.0, "end": 0.0}
+
+    def SetMediaItemPosition(item, pos, _refresh):
+        item["start"] = float(pos)
+        return True
+
+    def SetMediaItemLength(item, length, _refresh):
+        item["end"] = item["start"] + float(length)
+        return True
+
+    def AddTakeToMediaItem(item):
+        return item
+
+    def PCM_Source_CreateFromType(kind):
+        return {"type": str(kind)}
+
+    def SetMediaItemTake_Source(_take, _src):
+        return True
+
+    def defer(fn):
+        fn()  # synchronous in the mock: "after startup" is now
+
     def MIDI_GetPPQPosFromProjTime(_take, seconds):
         return float(seconds) * PPQ_PER_SECOND
 
@@ -143,6 +166,13 @@ def build_reaper_api(lua: LuaRuntime, state: State):
         "TrackFX_SetPreset": TrackFX_SetPreset,
         "CreateNewMIDIItemInProject": CreateNewMIDIItemInProject,
         "GetActiveTake": GetActiveTake,
+        "AddMediaItemToTrack": AddMediaItemToTrack,
+        "SetMediaItemPosition": SetMediaItemPosition,
+        "SetMediaItemLength": SetMediaItemLength,
+        "AddTakeToMediaItem": AddTakeToMediaItem,
+        "PCM_Source_CreateFromType": PCM_Source_CreateFromType,
+        "SetMediaItemTake_Source": SetMediaItemTake_Source,
+        "defer": defer,
         "MIDI_GetPPQPosFromProjTime": MIDI_GetPPQPosFromProjTime,
         "MIDI_InsertNote": MIDI_InsertNote,
         "MIDI_Sort": MIDI_Sort,
@@ -151,6 +181,12 @@ def build_reaper_api(lua: LuaRuntime, state: State):
         "GetSetProjectInfo_String": GetSetProjectInfo_String,
         "file_exists": file_exists,
     }
+    import os
+    if os.environ.get("FAKE_REAPER_STARTUP_API_GAP"):
+        # Mimic the startup gap seen on real hardware: this function is
+        # missing until the deferred phase — here, missing entirely, so
+        # the script must survive via its fallback ladder.
+        del api["CreateNewMIDIItemInProject"]
     return lua.table_from(api)
 
 

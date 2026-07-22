@@ -97,10 +97,25 @@ local function main()
     end
   end
 
-  -- One MIDI item spanning the whole timeline; insert notes at exact seconds
-  local item = reaper.CreateNewMIDIItemInProject(track, 0, job.total_seconds, false)
-  if not item then error("could not create MIDI item", 0) end
-  local take = reaper.GetActiveTake(item)
+  -- One MIDI item spanning the whole timeline; insert notes at exact
+  -- seconds. Fallback ladder because startup-run scripts have been seen
+  -- missing individual API functions.
+  local take
+  if reaper.CreateNewMIDIItemInProject then
+    local item = reaper.CreateNewMIDIItemInProject(track, 0, job.total_seconds, false)
+    if not item then error("could not create MIDI item", 0) end
+    take = reaper.GetActiveTake(item)
+  elseif reaper.AddMediaItemToTrack and reaper.PCM_Source_CreateFromType then
+    local item = reaper.AddMediaItemToTrack(track)
+    if not item then error("could not create media item (fallback)", 0) end
+    reaper.SetMediaItemPosition(item, 0, false)
+    reaper.SetMediaItemLength(item, job.total_seconds, false)
+    take = reaper.AddTakeToMediaItem(item)
+    local src = reaper.PCM_Source_CreateFromType("MIDI")
+    reaper.SetMediaItemTake_Source(take, src)
+  else
+    error("no MIDI item API available (CreateNewMIDIItemInProject missing)", 0)
+  end
   if not take then error("could not get MIDI take", 0) end
 
   local inserted = 0
@@ -145,9 +160,20 @@ local function main()
   end
 end
 
-write_file("render_started.txt", tostring(os.time()))
-local ok, err = pcall(main)
-if not ok then
-  write_file("render_result.txt", "ERROR: " .. tostring(err))
+local function run()
+  local ok, err = pcall(main)
+  if not ok then
+    write_file("render_result.txt", "ERROR: " .. tostring(err))
+  end
+  reaper.Main_OnCommand(40004, 0) -- File: Quit (controller kills us if a prompt blocks this)
 end
-reaper.Main_OnCommand(40004, 0) -- File: Quit (controller kills us if a prompt blocks this)
+
+write_file("render_started.txt", tostring(os.time()))
+-- Command-line scripts execute during REAPER startup, before the API is
+-- fully registered (observed: CreateNewMIDIItemInProject == nil). Defer
+-- the real work until the event loop is alive and the API is complete.
+if reaper.defer then
+  reaper.defer(run)
+else
+  run()
+end

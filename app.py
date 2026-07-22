@@ -19,7 +19,7 @@ from ui.settings_view import SettingsView
 from ui.reports_view import ReportsView
 
 APP_TITLE = "VST Sampling Factory"
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 ROOT_DIR = Path(__file__).parent
 CONFIG_PATH = ROOT_DIR / "settings.json"
 

@@ -186,6 +186,19 @@ def test_stale_instance_forwarding_detected(tmp_path: Path, fake_reaper_exe: Pat
         ctrl.render(rj, plan, timeout_seconds=60)
 
 
+def test_survives_missing_midi_item_api(
+    tmp_path: Path, fake_reaper_exe: Path, monkeypatch
+) -> None:
+    """Reproduces the real-hardware failure: CreateNewMIDIItemInProject
+    is nil. The script must complete via its fallback ladder."""
+    monkeypatch.setenv("FAKE_REAPER_STARTUP_API_GAP", "1")
+    config = make_config(tmp_path, fake_reaper_exe)
+    job = Job(plugin="VSTi: ReaSynth (Cockos)", preset="")
+    queue, _db = run_pipeline(config, [job], tmp_path)
+    result = queue.get(job.id)
+    assert result.status == JobStatus.COMPLETED, result.error
+
+
 def test_multi_job_batch_isolates_failures(tmp_path: Path, fake_reaper_exe: Path) -> None:
     config = make_config(tmp_path, fake_reaper_exe)
     good1 = Job(plugin="VSTi: ReaSynth (Cockos)", preset="")
