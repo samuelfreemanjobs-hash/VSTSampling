@@ -72,11 +72,23 @@ class DashboardView(ctk.CTkFrame):
         ctk.CTkButton(header, text="Re-check", width=80, command=self._run_checks).pack(
             side="right"
         )
+        ctk.CTkButton(
+            header, text="Save Diagnostics", width=130, command=self._save_diagnostics
+        ).pack(side="right", padx=(0, 8))
 
         self.check_rows = ctk.CTkFrame(panel, fg_color="transparent")
         self.check_rows.grid(row=1, column=0, padx=16, pady=(0, 12), sticky="ew")
         self.check_rows.grid_columnconfigure(1, weight=1)
         self._run_checks()
+
+    def _save_diagnostics(self) -> None:
+        from app import APP_VERSION
+        from core.diagnostics import save_report
+
+        path = save_report(self.app.config_obj, APP_VERSION)
+        self.app.set_status(
+            f"Diagnostics saved to {path} — open it and paste the contents to Claude"
+        )
 
     def _run_checks(self) -> None:
         for child in self.check_rows.winfo_children():

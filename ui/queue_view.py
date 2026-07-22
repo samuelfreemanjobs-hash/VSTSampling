@@ -288,6 +288,30 @@ class QueueView(ctk.CTkFrame):
                 bar.set(job.progress)
                 bar.grid(row=0, column=2, padx=8)
             elif job.error:
-                ctk.CTkLabel(
-                    frame, text=job.error[:60], text_color="#E04F4F", anchor="e"
-                ).grid(row=0, column=2, padx=8)
+                err = ctk.CTkLabel(
+                    frame, text=f"{job.error[:50]}…  (click for details)"
+                    if len(job.error) > 50 else job.error,
+                    text_color="#E04F4F", anchor="e",
+                )
+                err.grid(row=0, column=2, padx=8)
+                err.bind(
+                    "<Button-1>",
+                    lambda _e, j=job: self._show_error(j),
+                )
+
+    def _show_error(self, job) -> None:
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"Error — {job.display_name}")
+        dialog.geometry("560x300")
+        dialog.grab_set()
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(0, weight=1)
+        box = ctk.CTkTextbox(dialog, wrap="word")
+        box.grid(row=0, column=0, padx=16, pady=16, sticky="nsew")
+        box.insert(
+            "1.0",
+            f"{job.display_name}\n\n{job.error}\n\n"
+            "Tip: use 'Save Diagnostics' on the Dashboard and paste the file "
+            "to Claude to get this fixed.",
+        )
+        box.configure(state="disabled")

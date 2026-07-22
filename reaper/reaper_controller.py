@@ -79,11 +79,23 @@ class ReaperController:
         self.work_dir = work_dir or SCRIPT_DIR
 
     def prepare_job(self, job: RenderJob, plan: NotePlan) -> Path:
-        """Write the MIDI timeline, the slice map, and the job JSON."""
+        """Write the MIDI timeline, slice map, events file, and job JSON.
+
+        The .mid file is a reference artifact; the Lua script reads the
+        tab-separated events file instead (direct MIDI-API insertion —
+        no import prompts, tempo-independent timing).
+        """
         write_midi_file(plan, job.midi_file)
         plan.save_slice_map(job.output_wav.with_suffix(".slices.json"))
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+        events_file = self.work_dir / "current_events.txt"
+        lines = [
+            f"{e.start_seconds:.6f}\t{e.start_seconds + e.note_length_seconds:.6f}"
+            f"\t{e.midi_note}\t{e.velocity}"
+            for e in plan.events
+        ]
+        events_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
         job_file = self.work_dir / "current_job.json"
-        job_file.parent.mkdir(parents=True, exist_ok=True)
         job_file.write_text(job.to_json(), encoding="utf-8")
         return job_file
 

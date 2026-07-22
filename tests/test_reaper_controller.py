@@ -32,6 +32,15 @@ def test_prepare_job_writes_all_artifacts(tmp_path: Path) -> None:
     assert payload["sample_rate"] == 44100
     assert payload["total_seconds"] == round(plan.total_seconds, 3)
 
+    # Events file: one TAB-separated line per note, seconds-exact
+    events = (tmp_path / "current_events.txt").read_text().strip().splitlines()
+    assert len(events) == len(plan.events)
+    start, end, note, vel = events[0].split("\t")
+    assert float(start) == plan.events[0].start_seconds
+    assert float(end) == float(start) + plan.events[0].note_length_seconds
+    assert int(note) == plan.events[0].midi_note
+    assert int(vel) == plan.events[0].velocity
+
 
 def test_build_command_requires_reaper(tmp_path: Path) -> None:
     ctrl = ReaperController(reaper_path="", work_dir=tmp_path)
