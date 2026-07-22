@@ -70,6 +70,14 @@ def test_detect_loop_on_steady_tone() -> None:
     assert min(remainder, period - remainder) < period * 0.15
 
 
+def test_detect_loop_on_short_tone() -> None:
+    # 1s note (quick-test length) must still find a loop in a steady tone
+    signal = sine(220, 1.0)
+    loop = detect_loop(signal, SR)
+    assert isinstance(loop, LoopPoints)
+    assert loop.correlation > 0.9
+
+
 def test_detect_loop_rejects_noise_burst() -> None:
     rng = np.random.default_rng(7)
     # decaying white noise — no periodic structure

@@ -139,8 +139,14 @@ def detect_loop(
     correlates well enough (one-shots, evolving pads with no cycle).
     """
     mono = _to_mono_view(data).astype(np.float64)
+    duration = len(mono) / sr
+    # Scale the attack-skip and minimum loop length down for short
+    # samples so a 1s note can still yield a loop; keep the configured
+    # values as ceilings for long ones.
+    search_start_seconds = min(search_start_seconds, duration * 0.3)
+    min_loop_seconds = min(min_loop_seconds, duration * 0.15)
     start = int(search_start_seconds * sr)
-    min_lag = int(min_loop_seconds * sr)
+    min_lag = max(32, int(min_loop_seconds * sr))
     segment = mono[start:]
     if len(segment) < min_lag * 3:
         return None
