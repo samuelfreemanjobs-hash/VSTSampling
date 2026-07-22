@@ -30,7 +30,16 @@ RenderFn = Callable[[RenderJob, NotePlan], Path]
 
 
 def _safe_name(name: str) -> str:
-    return re.sub(r"[^\w\- ]+", "_", name).strip() or "Untitled"
+    name = re.sub(r"[^\w\-() ]+", "_", name)
+    name = re.sub(r"[_\s]{2,}", " ", name)
+    return name.strip(" _") or "Untitled"
+
+
+def _plugin_folder(plugin: str) -> str:
+    """'VSTi: ReaSynth (Cockos) (4 out)' -> 'ReaSynth (Cockos)'."""
+    name = re.sub(r"^\w+:\s*", "", plugin)
+    name = re.sub(r"\s*\(\d+ out\)\s*$", "", name)
+    return _safe_name(name)
 
 
 class PipelineRunner:
@@ -126,7 +135,7 @@ class PipelineRunner:
         s = self._job_settings(job)
         out_dir = (
             self.output_root
-            / _safe_name(job.plugin)
+            / _plugin_folder(job.plugin)
             / _safe_name(job.bank or "Default")
             / _safe_name(job.preset or "Default")
         )

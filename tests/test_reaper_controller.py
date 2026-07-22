@@ -74,4 +74,4 @@ def test_build_command_with_explicit_path(tmp_path: Path) -> None:
     ctrl = ReaperController(reaper_path=str(fake), work_dir=tmp_path)
     cmd = ctrl.build_command()
     assert cmd[0] == str(fake)
-    assert cmd[1:3] == ["-new", "-nosplash"]
+    assert cmd[1:4] == ["-newinst", "-new", "-nosplash"]

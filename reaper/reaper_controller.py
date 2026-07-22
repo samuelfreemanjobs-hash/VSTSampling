@@ -113,8 +113,11 @@ class ReaperController:
             )
         # Script files are positional arguments — Reaper runs .lua files
         # passed on the command line at startup (there is no -script flag).
+        # -newinst forces a private instance: without it, an already-open
+        # Reaper swallows the command and our process exits immediately.
         return [
             str(self.reaper_path),
+            "-newinst",
             "-new",
             "-nosplash",
             "-ignoreerrors",
@@ -125,7 +128,9 @@ class ReaperController:
         """Blocking render. Returns the output WAV path or raises ReaperError."""
         self.prepare_job(job, plan)
         result_file = self.work_dir / "render_result.txt"
+        started_file = self.work_dir / "render_started.txt"
         result_file.unlink(missing_ok=True)
+        started_file.unlink(missing_ok=True)
         job.output_wav.parent.mkdir(parents=True, exist_ok=True)
 
         cmd = self.build_command()
@@ -156,9 +161,17 @@ class ReaperController:
                 proc.kill()
 
         if not result_file.exists():
+            if not started_file.exists():
+                raise ReaperError(
+                    "Reaper exited without ever running the render script. "
+                    "Most common cause: another Reaper window was already open "
+                    "— close ALL Reaper windows and retry. If none were open, "
+                    "check for a Reaper error dialog on screen."
+                )
             raise ReaperError(
-                "Reaper exited without reporting a result. If a Reaper window "
-                "is open with an error dialog, note what it says and close it."
+                "The render script started but died before reporting a result. "
+                "If a Reaper window is open with an error dialog, note what it "
+                "says and close it, then retry."
             )
         result = result_file.read_text(encoding="utf-8").strip()
         if result.startswith("ERROR"):
