@@ -60,12 +60,31 @@ reaper.InsertTrackAtIndex(0, false)
 local track = reaper.GetTrack(0, 0)
 if not track then return fail("could not create track") end
 
+-- TrackFX_AddByName wants "VST:Name" / "VST3:Name" prefixes; the FX
+-- browser (and our plugin scanner) shows "VSTi: Name" / "VST3i: Name".
+local function fx_query(name)
+  local rest = name:match("^VSTi:%s*(.+)$")
+  if rest then return "VST:" .. rest end
+  rest = name:match("^VST3i:%s*(.+)$")
+  if rest then return "VST3:" .. rest end
+  return name
+end
+
 -- Instrument: either a saved FX chain or plugin by name (+ preset)
 if job.fxchain and job.fxchain ~= "" then
   local fx = reaper.TrackFX_AddByName(track, job.fxchain, false, -1000)
   if fx < 0 then return fail("could not load fx chain: " .. job.fxchain) end
 else
-  local fx = reaper.TrackFX_AddByName(track, job.plugin, false, -1000)
+  local query = fx_query(job.plugin)
+  local fx = reaper.TrackFX_AddByName(track, query, false, -1000)
+  if fx < 0 then
+    -- fall back to the raw name, then to the name without any prefix
+    fx = reaper.TrackFX_AddByName(track, job.plugin, false, -1000)
+  end
+  if fx < 0 then
+    local bare = job.plugin:match("^%w+i?:%s*(.+)$")
+    if bare then fx = reaper.TrackFX_AddByName(track, bare, false, -1000) end
+  end
   if fx < 0 then return fail("plugin not found in Reaper: '" .. tostring(job.plugin)
     .. "'. Open Reaper's FX browser and copy the exact name.") end
   if job.preset and job.preset ~= "" then

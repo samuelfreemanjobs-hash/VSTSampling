@@ -111,11 +111,13 @@ class ReaperController:
             raise ReaperError(
                 "Reaper executable not found. Set 'reaper_path' in settings.json."
             )
+        # Script files are positional arguments — Reaper runs .lua files
+        # passed on the command line at startup (there is no -script flag).
         return [
             str(self.reaper_path),
             "-new",
             "-nosplash",
-            "-script",
+            "-ignoreerrors",
             str(self.work_dir / RENDER_SCRIPT.name),
         ]
 
@@ -143,8 +145,21 @@ class ReaperController:
             proc.kill()
             raise ReaperError(f"Render timed out after {timeout_seconds}s")
 
+        # The script asks Reaper to quit, but a modal prompt (e.g. "save
+        # project?") could leave it hanging — once we have a result, the
+        # process has no further job to do. Reap it ourselves.
+        if proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
         if not result_file.exists():
-            raise ReaperError("Reaper exited without reporting a result")
+            raise ReaperError(
+                "Reaper exited without reporting a result. If a Reaper window "
+                "is open with an error dialog, note what it says and close it."
+            )
         result = result_file.read_text(encoding="utf-8").strip()
         if result.startswith("ERROR"):
             raise ReaperError(result)

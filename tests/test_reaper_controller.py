@@ -54,7 +54,7 @@ def test_build_command_requires_reaper(tmp_path: Path) -> None:
             ctrl.build_command()
     else:  # dev machine with reaper installed
         cmd = ctrl.build_command()
-        assert "-script" in cmd
+        assert cmd[-1].endswith("render_job.lua")
 
 
 def test_work_dir_and_script_path_are_absolute(tmp_path: Path, monkeypatch) -> None:
