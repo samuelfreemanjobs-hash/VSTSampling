@@ -11,6 +11,55 @@ Turns any VSTi preset into a playable sample instrument:
 5. Writes `instrument.json` + `samples.csv` metadata.
 6. Exports keygroup programs: MPC `.xpm`, `.sfz`, DecentSampler `.dspreset` (Kontakt loads the SFZ).
 
+## Preset auto-enumeration
+
+Instead of typing preset names, let the app read them from the plugin:
+
+1. Queue tab → pick a plugin from the dropdown.
+2. Click **Scan Presets…**. Reaper opens briefly and walks the plugin's
+   preset list. A dialog shows every preset with a checkbox.
+3. **All** / **None** to bulk-select, or tick individual presets.
+4. **Queue Selected** — one job per preset, selected by index (robust
+   against odd preset names).
+
+Presets are queued using whatever mode / quick-test / auto-length /
+FX-chain options are set at the time. Plugins with their own internal
+browser (Omnisphere) expose no presets to Reaper — the scan returns
+empty and you should use the FX-chain route instead.
+
+## Keygroup vs Drum-kit mode
+
+The **mode selector** on the Queue tab picks how a source is sampled:
+
+- **Keygroup (pitched)** — the default. Samples every N semitones, stretches
+  each sample across the gap to its neighbors, layers velocities, detects
+  sustain loops. Right for synths, pianos, pads, strings, basses.
+- **Drum kit (one-shots)** — samples every note chromatically at one
+  velocity, each sample covers only its own note (no stretching), loops are
+  disabled, and the export is a one-shot program (MPC `OneShot=True`,
+  SFZ `loop_mode=one_shot`). Notes the kit doesn't map render silent and are
+  dropped automatically. Right for the TR-808/909/606/707/727, and any
+  drum/percussion instrument.
+
+Use drum mode for your Roland TR machines — sampling them as pitched
+keygroups produces nonsense.
+
+## Auto length (decay probing)
+
+Tick **Auto length** and the app renders one long held note per preset
+first, measures how the sound behaves, and picks the note length + release
+tail automatically:
+
+- **Percussive/decaying** source (piano, pluck, drum) → the sound dies
+  while held, so the hold is shortened to just past the natural decay.
+- **Sustained** source (pad, organ, strings) → still sounding at note-off,
+  so the configured hold is kept and the tail is sized to the actual
+  release ring-out.
+
+This costs one extra short render per preset but removes the guesswork of
+setting lengths by hand. Without it, lengths come from settings / the
+profile table below.
+
 ## First-time setup
 
 1. Install Python 3.11+, Reaper, and (for XPM validation) MPC Software.
@@ -102,13 +151,37 @@ runner.join()   # blocks until the batch finishes
 
 Leave it overnight; the Markdown report ends up in `output/Logs/`.
 
+## MPC AutoSampler feature parity
+
+How this tool compares to the AutoSampler built into MPC Software:
+
+| AutoSampler feature | This tool |
+| ------------------- | --------- |
+| Note range (low/high) | ✅ `midi.lowest_note` / `highest_note` |
+| Note interval (every N semitones) | ✅ `midi.note_interval_semitones` |
+| Velocity layers | ✅ `velocities` (any count; MPC XPM capped at 4) |
+| Note length (hold) | ✅ setting, or **auto** via decay probe |
+| Release tail capture | ✅ `release_tail_seconds`, or **auto** |
+| Auto keygroup program creation | ✅ MPC `.xpm` written directly |
+| Sample naming (note + velocity) | ✅ `C3_v100.wav` convention |
+| Loop detection | ✅ autocorrelation + zero-crossing snap (AutoSampler has none) |
+| Round robins | ✅ SFZ / DecentSampler (MPC keygroups can't hold RR) |
+| Drum / one-shot programs | ✅ drum-kit mode |
+| Batch whole preset banks | ✅ preset scan + batch add (AutoSampler is one preset at a time) |
+| Multi-format export (SFZ, Kontakt, DecentSampler) | ✅ AutoSampler is MPC-only |
+| Sample external hardware via audio input | ❌ not supported — this tool renders VSTi output offline; live audio-input sampling is a possible future addition |
+
+In short: this covers AutoSampler's pitched-instrument and drum workflows,
+adds loop detection, auto-length, batch preset processing, and extra export
+formats — and omits only hardware-input recording.
+
 ## Known limitations
 
 - **XPM schema**: targets MPC Software 2.10+; validate the first export in
   MPC Software before trusting a big batch. Field defaults may need tuning.
-- **Preset selection** uses Reaper's `TrackFX_SetPreset`, which works for
-  plugins exposing native preset lists. For Omnisphere-style browsers, use
-  the `.RfxChain` route above.
+- **Preset selection** uses Reaper's preset API (by index after a scan, or
+  by name), which works for plugins exposing native preset lists. For
+  Omnisphere-style browsers, use the `.RfxChain` route above.
 - **One render pass per preset** means a preset change requires a new job —
   by design, so renders are deterministic and resumable.
 - Rendering requires a machine where Reaper can open the plugin UI-less;

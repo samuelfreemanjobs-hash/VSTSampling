@@ -9,7 +9,9 @@ import pytest
 import soundfile as sf
 
 from core.audio_processor import (
+    DecayProfile,
     LoopPoints,
+    analyze_decay,
     db_to_amplitude,
     detect_loop,
     normalize_peak,
@@ -103,6 +105,39 @@ def test_qc_flags_clipping_and_quiet(tmp_path: Path) -> None:
     sf.write(str(p3), np.zeros(SR // 2), SR)
     r3 = qc_check(p3)
     assert r3.silent and not r3.passed
+
+
+def test_analyze_decay_percussive(tmp_path: Path) -> None:
+    # Held for 6s but the sound is an exponential pluck dying in ~0.4s
+    hold = 6.0
+    n = int((hold + 4.0) * SR)
+    t = np.arange(n) / SR
+    env = np.exp(-t / 0.08)
+    signal = 0.6 * env * np.sin(2 * np.pi * 220 * t)
+    p = tmp_path / "pluck.wav"
+    sf.write(str(p), signal, SR)
+    profile = analyze_decay(p, hold_seconds=hold)
+    assert isinstance(profile, DecayProfile)
+    assert profile.percussive is True
+    assert profile.note_length_seconds < 2.0
+
+
+def test_analyze_decay_sustained(tmp_path: Path) -> None:
+    # Full-amplitude tone for the whole 3s hold, then a 1.5s release ring
+    hold, tail = 3.0, 2.0
+    total = hold + tail
+    n = int(total * SR)
+    t = np.arange(n) / SR
+    signal = 0.5 * np.sin(2 * np.pi * 220 * t)
+    # release ramp after note-off
+    rel = t > hold
+    signal[rel] *= np.maximum(0.0, 1.0 - (t[rel] - hold) / 1.5)
+    p = tmp_path / "pad.wav"
+    sf.write(str(p), signal, SR)
+    profile = analyze_decay(p, hold_seconds=hold)
+    assert profile.percussive is False
+    assert profile.note_length_seconds == hold
+    assert profile.release_tail_seconds > 1.0
 
 
 def test_slice_render_cuts_by_map(tmp_path: Path) -> None:

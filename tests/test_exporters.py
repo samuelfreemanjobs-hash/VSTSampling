@@ -107,6 +107,30 @@ def test_mpc_skips_round_robins(tmp_path: Path) -> None:
         assert len(inst.find("Layers").findall("Layer")) == 2  # 2 vels, rr0 only
 
 
+def test_drum_mode_mapping_is_one_shot_and_pinned() -> None:
+    imap = build_instrument_map(
+        "Kit", make_samples(notes=(36, 38, 42), vels=(127,), with_loop=True),
+        drum_mode=True,
+    )
+    assert imap.one_shot is True
+    for zone in imap.zones:
+        # 1-note-wide, no stretching across gaps
+        assert zone.low_note == zone.root_note == zone.high_note
+        # loops stripped even though source samples had loop points
+        assert not zone.has_loop
+
+
+def test_drum_mode_xpm_flags(tmp_path: Path) -> None:
+    imap = build_instrument_map(
+        "Kit", make_samples(notes=(36, 38), vels=(127,)), drum_mode=True
+    )
+    out = export_mpc_xpm(imap, tmp_path / "Kit.xpm")
+    instruments = ET.parse(str(out)).getroot().find("Program").find("Instruments")
+    for inst in instruments.findall("Instrument"):
+        assert inst.findtext("OneShot") == "True"
+        assert inst.findtext("IgnoreBaseNote") == "True"
+
+
 def test_kontakt_routes_to_sfz(tmp_path: Path) -> None:
     imap = build_instrument_map("Kon", make_samples())
     out = export_kontakt(imap, tmp_path, samples_relative_to=tmp_path)

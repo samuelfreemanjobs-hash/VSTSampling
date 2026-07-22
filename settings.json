@@ -15,7 +15,11 @@
         "channels": 2,
         "trim_silence": true,
         "normalize": false,
-        "normalize_target_db": -3.0
+        "normalize_target_db": -3.0,
+        "loop_detection": true,
+        "auto_length": false,
+        "probe_hold_seconds": 6.0,
+        "probe_tail_seconds": 8.0
     },
     "render": {
         "worker_threads": 4,

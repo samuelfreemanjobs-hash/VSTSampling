@@ -21,7 +21,17 @@ KNOWN_PLUGINS = {
     "ReaSynth (Cockos)",
     "Blofeld (Waldorf) (34 out)",
     "Diva (u-he)",
+    "Pluck (Test)",   # decays to silence in ~0.4s regardless of hold
+    "Kit (Test)",     # drum machine: only a few notes are mapped
 }
+
+PRESETS = {
+    "ReaSynth (Cockos)": ["Basic", "Soft Sine", "Bright Saw"],
+    "Diva (u-he)": ["Init", "Warm Pad", "Solo Lead", "Deep Bass"],
+    "Pluck (Test)": ["Nylon", "Steel"],
+}
+
+KIT_NOTES = {36, 38, 42, 45, 49}  # the only mapped pads on "Kit (Test)"
 
 
 class State:
@@ -33,7 +43,18 @@ class State:
         self.render_strings: dict[str, str] = {}
         self.fx_loaded: list[str] = []
         self.preset: str | None = None
+        self.preset_index = 0
         self.quit_called = False
+
+    @property
+    def plugin_name(self) -> str:
+        if not self.fx_loaded:
+            return ""
+        name = self.fx_loaded[0]
+        for prefix in ("VST3:", "VST:"):
+            if name.startswith(prefix):
+                return name[len(prefix):].strip()
+        return name
 
 
 def synthesize(state: State) -> Path | None:
@@ -46,15 +67,26 @@ def synthesize(state: State) -> Path | None:
     total = state.time_sel[1]
     frames = int(math.ceil(total * sr))
     audio = np.zeros(frames, dtype=np.float64)
+    plugin = state.plugin_name
     for start_s, end_s, pitch, vel in state.notes:
+        if plugin.startswith("Kit") and pitch not in KIT_NOTES:
+            continue  # unmapped drum pad: silence
         freq = 440.0 * 2 ** ((pitch - 69) / 12)
         amp = 0.5 * vel / 127.0
-        n0, n1 = int(start_s * sr), min(int(end_s * sr), frames)
-        if n1 <= n0:
-            continue
-        t = np.arange(n1 - n0) / sr
-        seg_len = (n1 - n0) / sr
-        env = np.minimum(1.0, np.minimum(t / 0.01, np.maximum(0.0, (seg_len - t) / 0.05)))
+        if plugin.startswith(("Pluck", "Kit")):
+            # Percussive: short decay independent of note-off
+            length = 0.4
+            n0 = int(start_s * sr)
+            n1 = min(n0 + int(length * sr), frames)
+            t = np.arange(n1 - n0) / sr
+            env = np.minimum(1.0, t / 0.005) * np.exp(-t / 0.08)
+        else:
+            n0, n1 = int(start_s * sr), min(int(end_s * sr), frames)
+            if n1 <= n0:
+                continue
+            t = np.arange(n1 - n0) / sr
+            seg_len = (n1 - n0) / sr
+            env = np.minimum(1.0, np.minimum(t / 0.01, np.maximum(0.0, (seg_len - t) / 0.05)))
         audio[n0:n1] += amp * env * np.sin(2 * np.pi * freq * t)
     data = np.tile(audio[:, None], (1, channels)) if channels > 1 else audio
     out = Path(out_dir) / f"{pattern}.wav"
@@ -98,6 +130,25 @@ def build_reaper_api(lua: LuaRuntime, state: State):
     def TrackFX_SetPreset(_track, _fx, preset):
         state.preset = str(preset)
         return not str(preset).startswith("BadPreset")
+
+    def TrackFX_GetPresetIndex(_track, _fx):
+        presets = PRESETS.get(state.plugin_name, [])
+        return (state.preset_index, len(presets))
+
+    def TrackFX_SetPresetByIndex(_track, _fx, idx):
+        presets = PRESETS.get(state.plugin_name, [])
+        idx = int(idx)
+        if 0 <= idx < len(presets):
+            state.preset_index = idx
+            state.preset = presets[idx]
+            return True
+        return False
+
+    def TrackFX_GetPreset(_track, _fx, _buf):
+        presets = PRESETS.get(state.plugin_name, [])
+        if presets:
+            return (True, presets[state.preset_index])
+        return (False, "")
 
     def CreateNewMIDIItemInProject(_track, start, end, _qn):
         return {"start": float(start), "end": float(end)}
@@ -199,6 +250,9 @@ def build_reaper_api(lua: LuaRuntime, state: State):
         "GetTrack": GetTrack,
         "TrackFX_AddByName": TrackFX_AddByName,
         "TrackFX_SetPreset": TrackFX_SetPreset,
+        "TrackFX_GetPresetIndex": TrackFX_GetPresetIndex,
+        "TrackFX_SetPresetByIndex": TrackFX_SetPresetByIndex,
+        "TrackFX_GetPreset": TrackFX_GetPreset,
         "CreateNewMIDIItemInProject": CreateNewMIDIItemInProject,
         "GetActiveTake": GetActiveTake,
         "AddMediaItemToTrack": AddMediaItemToTrack,

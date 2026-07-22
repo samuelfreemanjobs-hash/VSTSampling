@@ -9,6 +9,7 @@ a = Analysis(
     datas=[
         ('settings.json', '.'),
         ('reaper/scripts/render_job.lua', 'reaper/scripts'),
+        ('reaper/scripts/list_presets.lua', 'reaper/scripts'),
     ],
     hiddenimports=[
         'soundfile',

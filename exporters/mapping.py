@@ -33,6 +33,7 @@ class Zone:
 class InstrumentMap:
     name: str
     zones: list[Zone] = field(default_factory=list)
+    one_shot: bool = False  # drum mode: no pitch tracking, no loops, full decay
 
     @property
     def root_notes(self) -> list[int]:
@@ -47,18 +48,27 @@ class InstrumentMap:
         return max((z.round_robin for z in self.zones), default=0) + 1
 
 
-def build_instrument_map(name: str, samples: list[dict[str, Any]]) -> InstrumentMap:
+def build_instrument_map(
+    name: str, samples: list[dict[str, Any]], drum_mode: bool = False
+) -> InstrumentMap:
     """samples: dicts with file_path, midi_note, velocity, round_robin,
-    and optional loop_start/loop_end (as produced by the pipeline)."""
+    and optional loop_start/loop_end (as produced by the pipeline).
+
+    drum_mode: each sampled note covers ONLY itself (no stretching across
+    gaps — unmapped pads stay silent), zones are one-shots, loops dropped."""
     if not samples:
         raise ValueError("No samples to map")
 
     roots = sorted({int(s["midi_note"]) for s in samples})
     velocities = sorted({int(s["velocity"]) for s in samples})
 
-    # Key range per root: split gaps at the midpoint
+    # Key range per root: drum kits pin 1:1; pitched maps split gaps at
+    # the midpoint between sampled roots.
     note_range: dict[int, tuple[int, int]] = {}
     for i, root in enumerate(roots):
+        if drum_mode:
+            note_range[root] = (root, root)
+            continue
         low = 0 if i == 0 else (roots[i - 1] + root) // 2 + 1
         high = 127 if i == len(roots) - 1 else (root + roots[i + 1]) // 2
         note_range[root] = (low, high)
@@ -85,9 +95,9 @@ def build_instrument_map(name: str, samples: list[dict[str, Any]]) -> Instrument
                 low_vel=lo_v,
                 high_vel=hi_v,
                 round_robin=int(s.get("round_robin", 0) or 0),
-                loop_start=s.get("loop_start"),
-                loop_end=s.get("loop_end"),
+                loop_start=None if drum_mode else s.get("loop_start"),
+                loop_end=None if drum_mode else s.get("loop_end"),
             )
         )
     zones.sort(key=lambda z: (z.root_note, z.low_vel, z.round_robin))
-    return InstrumentMap(name=name, zones=zones)
+    return InstrumentMap(name=name, zones=zones, one_shot=drum_mode)

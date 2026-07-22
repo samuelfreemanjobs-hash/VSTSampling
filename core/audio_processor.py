@@ -192,6 +192,54 @@ def _snap_to_zero_crossing(mono: np.ndarray, frame: int, window: int = 512) -> i
     return int(candidates[np.argmin(np.abs(candidates - frame))])
 
 
+# -- decay probe -------------------------------------------------------
+
+
+@dataclass
+class DecayProfile:
+    percussive: bool           # sound dies while the note is still held
+    note_length_seconds: float  # recommended hold
+    release_tail_seconds: float  # recommended ring-out capture
+
+
+def analyze_decay(
+    path: Path,
+    hold_seconds: float,
+    threshold_db: float = -60.0,
+    min_note_seconds: float = 0.5,
+    max_tail_seconds: float = 8.0,
+) -> DecayProfile:
+    """Classify a probe render (one long held note) and recommend lengths.
+
+    Percussive/decaying source (piano, pluck, drum): sound falls below
+    threshold while held -> hold just past the natural decay, short tail.
+    Sustained source (pad, organ, strings): still sounding at note-off ->
+    keep the configured hold, tail sized to the actual release ring-out.
+    """
+    data, sr = sf.read(str(path), always_2d=True)
+    mono = np.abs(_to_mono_view(data))
+    if mono.size == 0:
+        return DecayProfile(True, min_note_seconds, 0.5)
+
+    # 50 ms envelope so single-sample zero crossings don't read as decay
+    win = max(1, int(sr * 0.05))
+    n_win = len(mono) // win
+    env = mono[: n_win * win].reshape(n_win, win).max(axis=1)
+    thresh = db_to_amplitude(threshold_db)
+    loud = np.flatnonzero(env > thresh)
+    if len(loud) == 0:
+        return DecayProfile(True, min_note_seconds, 0.5)
+
+    last_sound = (loud[-1] + 1) * win / sr
+    if last_sound < hold_seconds * 0.9:
+        # Died during the hold: percussive. Capture the full natural decay.
+        note_length = max(min_note_seconds, min(last_sound + 0.25, hold_seconds))
+        return DecayProfile(True, round(note_length, 2), 0.5)
+
+    release = max(0.5, min(last_sound - hold_seconds + 0.3, max_tail_seconds))
+    return DecayProfile(False, hold_seconds, round(release, 2))
+
+
 # -- QC ---------------------------------------------------------------
 
 

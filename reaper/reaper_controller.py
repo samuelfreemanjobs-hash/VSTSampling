@@ -15,6 +15,7 @@ log = get_logger(__name__)
 
 SCRIPT_DIR = Path(__file__).resolve().parent / "scripts"
 RENDER_SCRIPT = SCRIPT_DIR / "render_job.lua"
+LIST_PRESETS_SCRIPT = SCRIPT_DIR / "list_presets.lua"
 
 _DEFAULT_REAPER_PATHS = [
     r"C:\Program Files\REAPER (x64)\reaper.exe",
@@ -39,6 +40,7 @@ class RenderJob:
     bit_depth: int = 24
     channels: int = 2
     fxchain: str = ""
+    preset_index: int = -1  # >=0: select by index (robust); -1: by name
 
     def to_json(self) -> str:
         return json.dumps(
@@ -46,6 +48,7 @@ class RenderJob:
                 "plugin": self.plugin,
                 "preset": self.preset,
                 "fxchain": self.fxchain,
+                "preset_index": self.preset_index,
                 "midi_file": str(self.midi_file),
                 "output_wav": str(self.output_wav),
                 "total_seconds": round(self.total_seconds, 3),
@@ -135,7 +138,12 @@ class ReaperController:
         started_file.unlink(missing_ok=True)
         job.output_wav.parent.mkdir(parents=True, exist_ok=True)
 
-        cmd = self.build_command()
+        self._launch_and_wait(self.build_command(), result_file, timeout_seconds)
+        return self._read_result(result_file, started_file, job)
+
+    def _launch_and_wait(
+        self, cmd: list[str], result_file: Path, timeout_seconds: int
+    ) -> None:
         log.info("Launching Reaper: %s", " ".join(cmd))
         proc = subprocess.Popen(cmd, cwd=str(self.work_dir))
 
@@ -150,7 +158,7 @@ class ReaperController:
             time.sleep(1)
         else:
             proc.kill()
-            raise ReaperError(f"Render timed out after {timeout_seconds}s")
+            raise ReaperError(f"Reaper timed out after {timeout_seconds}s")
 
         # The script asks Reaper to quit, but a modal prompt (e.g. "save
         # project?") could leave it hanging — once we have a result, the
@@ -162,6 +170,58 @@ class ReaperController:
             except subprocess.TimeoutExpired:
                 proc.kill()
 
+    def enumerate_presets(self, plugin: str, timeout_seconds: int = 600) -> list[str]:
+        """Walk the plugin's preset list in a headless Reaper instance.
+
+        Returns preset names in index order (job preset_index == position).
+        Empty list means the plugin exposes no presets to Reaper (use an
+        FX chain for those). Raises ReaperError on scan failure.
+        """
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+        job_file = self.work_dir / "current_job.json"
+        job_file.write_text(json.dumps({"plugin": plugin}), encoding="utf-8")
+        script_copy = self.work_dir / LIST_PRESETS_SCRIPT.name
+        if script_copy.resolve() != LIST_PRESETS_SCRIPT.resolve():
+            shutil.copyfile(LIST_PRESETS_SCRIPT, script_copy)
+
+        result_file = self.work_dir / "presets_result.txt"
+        started_file = self.work_dir / "scan_started.txt"
+        result_file.unlink(missing_ok=True)
+        started_file.unlink(missing_ok=True)
+
+        if self.reaper_path is None:
+            raise ReaperError(
+                "Reaper executable not found. Set 'reaper_path' in settings.json."
+            )
+        cmd = [
+            str(self.reaper_path),
+            "-newinst",
+            "-new",
+            "-nosplash",
+            "-ignoreerrors",
+            str(script_copy),
+        ]
+        self._launch_and_wait(cmd, result_file, timeout_seconds)
+
+        if not result_file.exists():
+            if not started_file.exists():
+                raise ReaperError(
+                    "Reaper exited without running the preset scan — close ALL "
+                    "Reaper windows and retry."
+                )
+            raise ReaperError("Preset scan started but died before reporting")
+        result = result_file.read_text(encoding="utf-8").strip()
+        if result.startswith("ERROR"):
+            raise ReaperError(result)
+        if result == "NONE" or not result:
+            return []
+        names = [
+            line for line in result.splitlines() if line and not line.startswith("#")
+        ]
+        log.info("Preset scan for %s: %d presets", plugin, len(names))
+        return names
+
+    def _read_result(self, result_file: Path, started_file: Path, job: RenderJob) -> Path:
         if not result_file.exists():
             if not started_file.exists():
                 raise ReaperError(

@@ -127,9 +127,57 @@ class PipelineRunner:
             "loop_detection": cfg.get("audio.loop_detection", True),
             "exporters": cfg.get("exporters", {"mpc_xpm": True}),
             "fxchain": "",
+            "mode": "keygroup",
+            "auto_length": cfg.get("audio.auto_length", False),
+            "probe_hold_seconds": cfg.get("audio.probe_hold_seconds", 6.0),
+            "probe_tail_seconds": cfg.get("audio.probe_tail_seconds", 8.0),
         }
         s.update(job.settings_override or {})
+        if s["mode"] == "drum":
+            s["loop_detection"] = False
         return s
+
+    def _probe_lengths(self, job: Job, s: dict[str, Any], out_dir: Path):
+        """Render one long held note and measure how the sound decays."""
+        from core.audio_processor import analyze_decay
+
+        self.queue.update(job.id, progress=0.02, message="Probing decay length")
+        hold = float(s["probe_hold_seconds"])
+        tail = float(s["probe_tail_seconds"])
+        mid_note = (int(s["lowest_note"]) + int(s["highest_note"])) // 2
+        probe_plan = build_note_plan(
+            lowest_note=mid_note,
+            highest_note=mid_note,
+            interval_semitones=1,
+            velocities=[max(s["velocities"])],
+            round_robins=1,
+            note_length_seconds=hold,
+            release_tail_seconds=tail,
+        )
+        probe_dir = out_dir / "_probe"
+        probe_wav = probe_dir / "probe.wav"
+        probe_job = RenderJob(
+            plugin=job.plugin,
+            preset=job.preset,
+            midi_file=probe_dir / "timeline.mid",
+            output_wav=probe_wav,
+            total_seconds=probe_plan.total_seconds,
+            sample_rate=s["sample_rate"],
+            bit_depth=s["bit_depth"],
+            channels=s["channels"],
+            fxchain=s["fxchain"],
+            preset_index=int(s.get("preset_index", -1)),
+        )
+        if self._render_fn is not None:
+            ctrl = ReaperController(work_dir=probe_dir)
+            ctrl.prepare_job(probe_job, probe_plan)
+            self._render_fn(probe_job, probe_plan)
+        else:
+            ctrl = ReaperController(
+                reaper_path=self.config.get("reaper_path", ""), work_dir=probe_dir
+            )
+            ctrl.render(probe_job, probe_plan)
+        return analyze_decay(probe_wav, hold_seconds=hold)
 
     def _run_job(self, job: Job) -> int:
         s = self._job_settings(job)
@@ -148,6 +196,18 @@ class PipelineRunner:
 
         self.queue.update(job.id, status=JobStatus.RUNNING, progress=0.0, message="Planning")
         try:
+            if s.get("auto_length"):
+                profile = self._probe_lengths(job, s, out_dir)
+                s["note_length_seconds"] = profile.note_length_seconds
+                s["release_tail_seconds"] = profile.release_tail_seconds
+                log.info(
+                    "Auto-length for %s: %s, hold=%.2fs tail=%.2fs",
+                    job.display_name,
+                    "percussive" if profile.percussive else "sustained",
+                    profile.note_length_seconds,
+                    profile.release_tail_seconds,
+                )
+
             plan = build_note_plan(
                 lowest_note=s["lowest_note"],
                 highest_note=s["highest_note"],
@@ -171,6 +231,7 @@ class PipelineRunner:
                 bit_depth=s["bit_depth"],
                 channels=s["channels"],
                 fxchain=s["fxchain"],
+                preset_index=int(s.get("preset_index", -1)),
             )
             if self._render_fn is not None:
                 ctrl = ReaperController(work_dir=out_dir)
@@ -259,7 +320,9 @@ class PipelineRunner:
                 settings={k: v for k, v in s.items() if k != "exporters"},
             )
             imap = build_instrument_map(
-                _safe_name(job.preset or job.plugin), sample_rows
+                _safe_name(job.preset) if job.preset else _plugin_folder(job.plugin),
+                sample_rows,
+                drum_mode=s["mode"] == "drum",
             )
             exporters_cfg = s["exporters"]
             if exporters_cfg.get("mpc_xpm"):

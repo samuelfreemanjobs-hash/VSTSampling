@@ -20,6 +20,20 @@ QUICK_TEST_OVERRIDE = {
     "release_tail_seconds": 0.5,
 }
 
+# Drum kits: every note chromatically, one velocity, one-shots with a
+# generous ring-out; unmapped notes render silent and are dropped.
+DRUM_MODE_OVERRIDE = {
+    "mode": "drum",
+    "lowest_note": 24,
+    "highest_note": 96,
+    "interval_semitones": 1,
+    "velocities": [127],
+    "round_robins": 1,
+    "note_length_seconds": 0.5,
+    "release_tail_seconds": 2.5,
+    "loop_detection": False,
+}
+
 _STATUS_COLORS = {
     JobStatus.PENDING: "gray",
     JobStatus.RUNNING: "#3B8ED0",
@@ -76,11 +90,21 @@ class QueueView(ctk.CTkFrame):
             row=0, column=3, padx=(6, 0)
         )
 
-        self.quick_test = ctk.CTkCheckBox(
-            row,
-            text="Quick test (4 tiny samples, ~1 min — use this to verify setup first)",
+        options = ctk.CTkFrame(row, fg_color="transparent")
+        options.grid(row=1, column=0, columnspan=3, pady=(6, 0), sticky="w")
+
+        self.mode_menu = ctk.CTkOptionMenu(
+            options, values=["Keygroup (pitched)", "Drum kit (one-shots)"], width=180
         )
-        self.quick_test.grid(row=1, column=0, columnspan=2, pady=(6, 0), sticky="w")
+        self.mode_menu.pack(side="left", padx=(0, 12))
+
+        self.quick_test = ctk.CTkCheckBox(options, text="Quick test (~1 min)")
+        self.quick_test.pack(side="left", padx=(0, 12))
+
+        self.auto_length = ctk.CTkCheckBox(
+            options, text="Auto length (probe each preset)"
+        )
+        self.auto_length.pack(side="left")
 
         # Optional saved Reaper FX chain — captures a fully dialed-in sound,
         # needed for plugins whose presets Reaper can't select by name.
@@ -89,8 +113,13 @@ class QueueView(ctk.CTkFrame):
             row, text="FX Chain…", width=100, command=self._pick_fxchain
         )
         self.fxchain_btn.grid(row=1, column=2, pady=(6, 0), sticky="e")
-        ctk.CTkButton(row, text="Batch Add…", width=100, command=self._open_batch_add).grid(
-            row=1, column=3, padx=(6, 0), pady=(6, 0)
+        side = ctk.CTkFrame(row, fg_color="transparent")
+        side.grid(row=1, column=3, padx=(6, 0), pady=(6, 0), sticky="e")
+        ctk.CTkButton(side, text="Scan Presets…", width=110, command=self._scan_presets).pack(
+            side="top", pady=(0, 4)
+        )
+        ctk.CTkButton(side, text="Batch Add…", width=110, command=self._open_batch_add).pack(
+            side="top"
         )
 
     def _pick_fxchain(self) -> None:
@@ -152,10 +181,122 @@ class QueueView(ctk.CTkFrame):
         )
 
     def _current_override(self) -> dict:
-        override: dict = dict(QUICK_TEST_OVERRIDE) if self.quick_test.get() else {}
+        override: dict = {}
+        if self.mode_menu.get().startswith("Drum"):
+            override.update(DRUM_MODE_OVERRIDE)
+        if self.quick_test.get():
+            override.update(QUICK_TEST_OVERRIDE)
+        if self.auto_length.get():
+            override["auto_length"] = True
         if self._fxchain:
             override["fxchain"] = self._fxchain
         return override
+
+    # -- preset scanning ----------------------------------------------
+
+    def _scan_presets(self) -> None:
+        plugin = self.plugin_entry.get().strip()
+        if not plugin or plugin.startswith("("):
+            self.app.set_status("Pick a plugin first")
+            return
+        self.app.set_status(f"Scanning presets of {plugin} — Reaper will open briefly…")
+
+        def worker() -> None:
+            from core.pipeline import _plugin_folder
+            from reaper.reaper_controller import ReaperController, ReaperError
+
+            try:
+                scan_dir = (
+                    Path(self.app.config_obj.get("output_dir", "output")).resolve()
+                    / "_preset_scans"
+                    / _plugin_folder(plugin)
+                )
+                ctrl = ReaperController(
+                    reaper_path=self.app.config_obj.get("reaper_path", ""),
+                    work_dir=scan_dir,
+                )
+                names = ctrl.enumerate_presets(plugin)
+                self.after(0, lambda: self._show_scan_results(plugin, names))
+            except ReaperError as exc:
+                msg = str(exc)
+                self.after(0, lambda: self.app.set_status(f"Preset scan failed: {msg}"))
+
+        import threading
+
+        threading.Thread(target=worker, daemon=True, name="preset-scan").start()
+
+    def _show_scan_results(self, plugin: str, names: list[str]) -> None:
+        if not names:
+            self.app.set_status(
+                f"{plugin} exposes no presets to Reaper — use an FX chain instead"
+            )
+            return
+        self.app.set_status(f"Found {len(names)} presets")
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"Presets — {plugin}")
+        dialog.geometry("520x560")
+        dialog.grab_set()
+        dialog.grid_columnconfigure(0, weight=1)
+        dialog.grid_rowconfigure(1, weight=1)
+
+        header = ctk.CTkFrame(dialog, fg_color="transparent")
+        header.grid(row=0, column=0, padx=16, pady=(16, 4), sticky="ew")
+        count_label = ctk.CTkLabel(header, text=f"{len(names)} presets — 0 selected")
+        count_label.pack(side="left")
+
+        scroll = ctk.CTkScrollableFrame(dialog)
+        scroll.grid(row=1, column=0, padx=16, pady=8, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+
+        vars_: list[ctk.BooleanVar] = []
+
+        def update_count() -> None:
+            n = sum(1 for v in vars_ if v.get())
+            count_label.configure(text=f"{len(names)} presets — {n} selected")
+
+        for i, name in enumerate(names):
+            var = ctk.BooleanVar(value=False)
+            vars_.append(var)
+            ctk.CTkCheckBox(
+                scroll, text=name, variable=var, command=update_count
+            ).grid(row=i, column=0, sticky="w", pady=1)
+
+        def set_all(value: bool) -> None:
+            for v in vars_:
+                v.set(value)
+            update_count()
+
+        ctk.CTkButton(header, text="All", width=50, command=lambda: set_all(True)).pack(
+            side="right", padx=(4, 0)
+        )
+        ctk.CTkButton(header, text="None", width=54, command=lambda: set_all(False)).pack(
+            side="right"
+        )
+
+        def queue_selected() -> None:
+            base = self._current_override()
+            queued = 0
+            for i, name in enumerate(names):
+                if not vars_[i].get():
+                    continue
+                override = dict(base)
+                override["preset_index"] = i
+                self.queue.add(
+                    Job(
+                        plugin=plugin,
+                        bank=self.bank_entry.get().strip(),
+                        preset=name,
+                        settings_override=override,
+                    )
+                )
+                queued += 1
+            self.app.set_status(f"Queued {queued} preset job(s)")
+            dialog.destroy()
+
+        ctk.CTkButton(dialog, text="Queue Selected", command=queue_selected).grid(
+            row=2, column=0, padx=16, pady=(8, 16), sticky="e"
+        )
 
     def _build_controls(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent")

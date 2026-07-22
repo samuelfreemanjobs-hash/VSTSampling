@@ -35,6 +35,8 @@ def export_sfz(imap: InstrumentMap, output_path: Path, samples_relative_to: Path
         lines.append(f"pitch_keycenter={zone.root_note}")
         lines.append(f"lokey={zone.low_note} hikey={zone.high_note}")
         lines.append(f"lovel={zone.low_vel} hivel={zone.high_vel}")
+        if imap.one_shot:
+            lines.append("loop_mode=one_shot")
         if rr_count > 1:
             lines.append(f"seq_length={rr_count} seq_position={zone.round_robin + 1}")
         if zone.has_loop:

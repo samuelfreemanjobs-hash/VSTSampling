@@ -93,7 +93,14 @@ local function main()
       error("plugin not found in Reaper: '" .. tostring(job.plugin)
         .. "'. Open Reaper's FX browser and copy the exact name.", 0)
     end
-    if job.preset and job.preset ~= "" then
+    if job.preset_index and tonumber(job.preset_index) and tonumber(job.preset_index) >= 0 then
+      -- Index selection (from a preset scan): robust against name quirks
+      local ok = reaper.TrackFX_SetPresetByIndex(track, fx, tonumber(job.preset_index))
+      if not ok then
+        error("could not select preset index " .. tostring(job.preset_index)
+          .. " ('" .. tostring(job.preset) .. "') — re-run the preset scan", 0)
+      end
+    elseif job.preset and job.preset ~= "" then
       local ok = reaper.TrackFX_SetPreset(track, fx, job.preset)
       if not ok then
         error("preset not found: '" .. job.preset
