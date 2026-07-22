@@ -11,6 +11,7 @@ try:
 except ImportError:
     psutil = None
 
+from core.env_check import run_checks
 from core.queue_manager import JobStatus
 
 _REFRESH_MS = 2000
@@ -45,8 +46,7 @@ class DashboardView(ctk.CTkFrame):
         self.disk_value = self._card(cards, 3, "Output Disk", "—")
 
         activity = ctk.CTkFrame(self)
-        activity.grid(row=3, column=0, padx=24, pady=24, sticky="nsew")
-        self.grid_rowconfigure(3, weight=1)
+        activity.grid(row=3, column=0, padx=24, pady=(24, 8), sticky="ew")
         activity.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -55,7 +55,50 @@ class DashboardView(ctk.CTkFrame):
         self.activity_label = ctk.CTkLabel(activity, text="Idle", text_color="gray", anchor="w")
         self.activity_label.grid(row=1, column=0, padx=16, pady=(0, 12), sticky="ew")
 
+        self._build_check_panel()
         self._tick()
+
+    def _build_check_panel(self) -> None:
+        panel = ctk.CTkFrame(self)
+        panel.grid(row=4, column=0, padx=24, pady=(8, 24), sticky="nsew")
+        self.grid_rowconfigure(4, weight=1)
+        panel.grid_columnconfigure(0, weight=1)
+
+        header = ctk.CTkFrame(panel, fg_color="transparent")
+        header.grid(row=0, column=0, padx=16, pady=(12, 4), sticky="ew")
+        ctk.CTkLabel(
+            header, text="Setup Check", font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(side="left")
+        ctk.CTkButton(header, text="Re-check", width=80, command=self._run_checks).pack(
+            side="right"
+        )
+
+        self.check_rows = ctk.CTkFrame(panel, fg_color="transparent")
+        self.check_rows.grid(row=1, column=0, padx=16, pady=(0, 12), sticky="ew")
+        self.check_rows.grid_columnconfigure(1, weight=1)
+        self._run_checks()
+
+    def _run_checks(self) -> None:
+        for child in self.check_rows.winfo_children():
+            child.destroy()
+        row = 0
+        for check in run_checks(self.app.config_obj):
+            icon = "✓" if check.ok else "✗"
+            color = "#2CC985" if check.ok else "#E04F4F"
+            ctk.CTkLabel(
+                self.check_rows, text=icon, width=24, text_color=color,
+                font=ctk.CTkFont(size=14, weight="bold"),
+            ).grid(row=row, column=0, sticky="w")
+            ctk.CTkLabel(
+                self.check_rows, text=f"{check.label}: {check.detail}", anchor="w"
+            ).grid(row=row, column=1, sticky="ew", padx=(4, 0))
+            row += 1
+            if not check.ok and check.fix:
+                ctk.CTkLabel(
+                    self.check_rows, text=f"→ {check.fix}", anchor="w",
+                    text_color="gray", wraplength=700, justify="left",
+                ).grid(row=row, column=1, sticky="ew", padx=(4, 0))
+                row += 1
 
     def _card(self, parent, col: int, label: str, value: str) -> ctk.CTkLabel:
         card = ctk.CTkFrame(parent, height=80)

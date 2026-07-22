@@ -4,6 +4,18 @@ from __future__ import annotations
 import customtkinter as ctk
 
 from core.queue_manager import Job, JobStatus
+from reaper.plugin_scanner import scan_reaper_plugins
+
+# A fast validation job: 2 notes x 1 velocity, short holds — done in ~1 min
+QUICK_TEST_OVERRIDE = {
+    "lowest_note": 48,
+    "highest_note": 60,
+    "interval_semitones": 12,
+    "velocities": [100],
+    "round_robins": 1,
+    "note_length_seconds": 1.5,
+    "release_tail_seconds": 0.5,
+}
 
 _STATUS_COLORS = {
     JobStatus.PENDING: "gray",
@@ -46,8 +58,13 @@ class QueueView(ctk.CTkFrame):
         row.grid(row=1, column=0, padx=24, pady=4, sticky="ew")
         row.grid_columnconfigure((0, 1, 2), weight=1)
 
-        self.plugin_entry = ctk.CTkEntry(row, placeholder_text="Plugin (e.g. Omnisphere)")
+        plugins = [p.display_name for p in scan_reaper_plugins()]
+        self.plugin_entry = ctk.CTkComboBox(
+            row, values=plugins or ["(no plugins found — type the name manually)"]
+        )
+        self.plugin_entry.set(plugins[0] if plugins else "")
         self.plugin_entry.grid(row=0, column=0, padx=(0, 6), sticky="ew")
+
         self.bank_entry = ctk.CTkEntry(row, placeholder_text="Bank (optional)")
         self.bank_entry.grid(row=0, column=1, padx=6, sticky="ew")
         self.preset_entry = ctk.CTkEntry(row, placeholder_text="Preset (optional)")
@@ -55,6 +72,12 @@ class QueueView(ctk.CTkFrame):
         ctk.CTkButton(row, text="Add Job", width=100, command=self._add_job).grid(
             row=0, column=3, padx=(6, 0)
         )
+
+        self.quick_test = ctk.CTkCheckBox(
+            row,
+            text="Quick test (4 tiny samples, ~1 min — use this to verify setup first)",
+        )
+        self.quick_test.grid(row=1, column=0, columnspan=3, pady=(6, 0), sticky="w")
 
     def _build_controls(self) -> None:
         bar = ctk.CTkFrame(self, fg_color="transparent")
@@ -86,14 +109,16 @@ class QueueView(ctk.CTkFrame):
 
     def _add_job(self) -> None:
         plugin = self.plugin_entry.get().strip()
-        if not plugin:
+        if not plugin or plugin.startswith("("):
             self.app.set_status("Plugin name is required")
             return
+        override = dict(QUICK_TEST_OVERRIDE) if self.quick_test.get() else {}
         self.queue.add(
             Job(
                 plugin=plugin,
                 bank=self.bank_entry.get().strip(),
                 preset=self.preset_entry.get().strip(),
+                settings_override=override,
             )
         )
         self.preset_entry.delete(0, "end")
