@@ -76,7 +76,9 @@ def find_reaper(configured: str = "") -> Path | None:
 class ReaperController:
     def __init__(self, reaper_path: str = "", work_dir: Path | None = None) -> None:
         self.reaper_path = find_reaper(reaper_path)
-        self.work_dir = work_dir or SCRIPT_DIR
+        # Absolute, because Reaper resolves the -script argument (and the
+        # Lua script resolves its sibling files) from its own directory.
+        self.work_dir = (work_dir or SCRIPT_DIR).resolve()
 
     def prepare_job(self, job: RenderJob, plan: NotePlan) -> Path:
         """Write the MIDI timeline, slice map, events file, and job JSON.

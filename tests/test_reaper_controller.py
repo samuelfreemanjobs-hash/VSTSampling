@@ -57,6 +57,17 @@ def test_build_command_requires_reaper(tmp_path: Path) -> None:
         assert "-script" in cmd
 
 
+def test_work_dir_and_script_path_are_absolute(tmp_path: Path, monkeypatch) -> None:
+    # Reaper runs with its own cwd; a relative -script path silently fails.
+    monkeypatch.chdir(tmp_path)
+    fake = tmp_path / "reaper.exe"
+    fake.write_bytes(b"")
+    ctrl = ReaperController(reaper_path=str(fake), work_dir=Path("output") / "job")
+    assert ctrl.work_dir.is_absolute()
+    cmd = ctrl.build_command()
+    assert Path(cmd[-1]).is_absolute()
+
+
 def test_build_command_with_explicit_path(tmp_path: Path) -> None:
     fake = tmp_path / "reaper.exe"
     fake.write_bytes(b"")

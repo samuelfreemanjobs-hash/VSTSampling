@@ -45,7 +45,9 @@ class PipelineRunner:
         self.queue = queue
         self.config = config
         self.db = db or Database(Path(config.get("database_path", "database/factory.db")))
-        self.output_root = output_root or Path(config.get("output_dir", "output"))
+        # Absolute: these paths get handed to Reaper, which runs with a
+        # different working directory than the app.
+        self.output_root = (output_root or Path(config.get("output_dir", "output"))).resolve()
         self._render_fn = render_fn
         self._thread: threading.Thread | None = None
 
