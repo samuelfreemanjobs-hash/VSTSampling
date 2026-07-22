@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Application data
+logs/*.log
+output/**
+database/*.db
+database/*.db-journal
+database/*.db-wal
+database/*.db-shm
+
+# Audio work products
+*.wav
+*.aif
+*.aiff
+*.flac
+!tests/fixtures/*.wav
+
+# User config
+settings.local.json
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
