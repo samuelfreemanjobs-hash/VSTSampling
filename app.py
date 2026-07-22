@@ -155,6 +155,12 @@ class App(ctk.CTk):
         if getattr(self, "_runner", None) and self._runner.is_running:
             self.set_status("Queue already running")
             return
+        if self.queue.next_pending() is None:
+            self.set_status(
+                "Queue is empty — fill in the plugin row and click 'Add Job' first, "
+                "then Start Queue"
+            )
+            return
         self._runner = PipelineRunner(self.queue, self.config_obj)
         self._runner.start()
         self.set_status("Queue started")

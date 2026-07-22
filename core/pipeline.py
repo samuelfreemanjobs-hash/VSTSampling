@@ -70,15 +70,22 @@ class PipelineRunner:
 
     def _run_loop(self) -> None:
         run_ids: list[int] = []
-        while not self.queue.cancel_event.is_set():
-            if self.queue.pause_event.is_set():
-                if self.queue.pause_event.wait(0.2):
-                    continue
-            job = self.queue.next_pending()
-            if job is None:
-                break
-            run_ids.append(self._run_job(job))
-        self._write_batch_report(run_ids)
+        try:
+            log.info("Pipeline started; %d job(s) pending",
+                     sum(1 for j in self.queue.jobs() if j.status == JobStatus.PENDING))
+            while not self.queue.cancel_event.is_set():
+                if self.queue.pause_event.is_set():
+                    if self.queue.pause_event.wait(0.2):
+                        continue
+                job = self.queue.next_pending()
+                if job is None:
+                    break
+                run_ids.append(self._run_job(job))
+        except Exception:  # noqa: BLE001 — a dead worker must leave a trace in the log
+            log.exception("Pipeline worker crashed")
+        finally:
+            log.info("Pipeline finished; %d run(s)", len(run_ids))
+            self._write_batch_report(run_ids)
 
     def _write_batch_report(self, run_ids: list[int]) -> None:
         if not run_ids:
