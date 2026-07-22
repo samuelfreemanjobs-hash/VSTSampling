@@ -147,11 +147,6 @@ class App(ctk.CTk):
         self.queue_status.configure(text=text)
 
     def start_queue(self) -> None:
-        try:
-            from core.pipeline import PipelineRunner
-        except ImportError:
-            self.set_status("Pipeline not available yet (arrives in v0.7)")
-            return
         if getattr(self, "_runner", None) and self._runner.is_running:
             self.set_status("Queue already running")
             return
@@ -161,8 +156,15 @@ class App(ctk.CTk):
                 "then Start Queue"
             )
             return
-        self._runner = PipelineRunner(self.queue, self.config_obj)
-        self._runner.start()
+        try:
+            from core.pipeline import PipelineRunner
+
+            self._runner = PipelineRunner(self.queue, self.config_obj)
+            self._runner.start()
+        except Exception as exc:  # noqa: BLE001 — surface any startup failure to the user
+            log.exception("Could not start queue")
+            self.set_status(f"Could not start queue: {exc}")
+            return
         self.set_status("Queue started")
 
 

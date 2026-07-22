@@ -66,6 +66,8 @@ class Database:
     plenty for a desktop app writing a few rows per second."""
 
     def __init__(self, path: Path | str = ":memory:") -> None:
+        if str(path) != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
