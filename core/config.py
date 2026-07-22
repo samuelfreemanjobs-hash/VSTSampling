@@ -36,6 +36,9 @@ class Config:
             node = node[part]
         node[parts[-1]] = value
 
+    def replace(self, data: dict[str, Any]) -> None:
+        self._data = data
+
     def save(self) -> None:
         if self._path is None:
             raise RuntimeError("Config has no backing file")

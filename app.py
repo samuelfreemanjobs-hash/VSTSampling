@@ -11,6 +11,7 @@ import customtkinter as ctk
 
 from core.config import Config
 from core.logger import get_logger
+from core.queue_manager import QueueManager
 from ui.dashboard import DashboardView
 from ui.queue_view import QueueView
 from ui.banks_view import BanksView
@@ -29,6 +30,8 @@ class App(ctk.CTk):
     def __init__(self, config: Config) -> None:
         super().__init__()
         self.config_obj = config
+        self.queue = QueueManager(save_path=ROOT_DIR / "database" / "queue.json")
+        self.queue.load()
 
         ctk.set_appearance_mode(config.get("ui.theme", "dark"))
         ctk.set_default_color_theme(config.get("ui.color_theme", "blue"))
@@ -142,6 +145,19 @@ class App(ctk.CTk):
 
     def set_queue_status(self, text: str) -> None:
         self.queue_status.configure(text=text)
+
+    def start_queue(self) -> None:
+        try:
+            from core.pipeline import PipelineRunner
+        except ImportError:
+            self.set_status("Pipeline not available yet (arrives in v0.7)")
+            return
+        if getattr(self, "_runner", None) and self._runner.is_running:
+            self.set_status("Queue already running")
+            return
+        self._runner = PipelineRunner(self.queue, self.config_obj)
+        self._runner.start()
+        self.set_status("Queue started")
 
 
 def main() -> int:
