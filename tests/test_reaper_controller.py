@@ -27,6 +27,11 @@ def test_prepare_job_writes_all_artifacts(tmp_path: Path) -> None:
 
     assert (tmp_path / "timeline.mid").exists()
     assert (tmp_path / "render.slices.json").exists()
+    # The lua script must be copied next to the job files it reads
+    assert (tmp_path / "render_job.lua").exists()
+    cmd = ctrl.build_command() if ctrl.reaper_path else None
+    if cmd:
+        assert cmd[-1] == str(tmp_path / "render_job.lua")
     payload = json.loads(job_file.read_text())
     assert payload["plugin"] == "VSTi: Serum (Xfer Records)"
     assert payload["sample_rate"] == 44100

@@ -97,6 +97,11 @@ class ReaperController:
         events_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
         job_file = self.work_dir / "current_job.json"
         job_file.write_text(job.to_json(), encoding="utf-8")
+        # The Lua script resolves job/events/result paths relative to its own
+        # location, so run a copy that lives next to the job files.
+        script_copy = self.work_dir / RENDER_SCRIPT.name
+        if script_copy.resolve() != RENDER_SCRIPT.resolve():
+            shutil.copyfile(RENDER_SCRIPT, script_copy)
         return job_file
 
     def build_command(self) -> list[str]:
@@ -109,7 +114,7 @@ class ReaperController:
             "-new",
             "-nosplash",
             "-script",
-            str(RENDER_SCRIPT),
+            str(self.work_dir / RENDER_SCRIPT.name),
         ]
 
     def render(self, job: RenderJob, plan: NotePlan, timeout_seconds: int = 1800) -> Path:
