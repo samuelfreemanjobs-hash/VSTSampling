@@ -199,6 +199,18 @@ def test_survives_missing_midi_item_api(
     assert result.status == JobStatus.COMPLETED, result.error
 
 
+def test_api_fallback_branch_still_works(
+    tmp_path: Path, fake_reaper_exe: Path, monkeypatch
+) -> None:
+    """With the chunk API missing, the per-note insertion branch runs."""
+    monkeypatch.setenv("FAKE_REAPER_NO_CHUNK_API", "1")
+    config = make_config(tmp_path, fake_reaper_exe)
+    job = Job(plugin="VSTi: ReaSynth (Cockos)", preset="")
+    queue, _db = run_pipeline(config, [job], tmp_path)
+    result = queue.get(job.id)
+    assert result.status == JobStatus.COMPLETED, result.error
+
+
 def test_multi_job_batch_isolates_failures(tmp_path: Path, fake_reaper_exe: Path) -> None:
     config = make_config(tmp_path, fake_reaper_exe)
     good1 = Job(plugin="VSTi: ReaSynth (Cockos)", preset="")

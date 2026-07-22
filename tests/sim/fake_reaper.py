@@ -131,6 +131,35 @@ def build_reaper_api(lua: LuaRuntime, state: State):
     def SetMediaTrackInfo_Value(_track, _param, _value):
         return True
 
+    def SetCurrentBPM(_proj, _bpm, _undo):
+        return None
+
+    def UpdateArrange():
+        return None
+
+    def SetItemStateChunk(item, chunk, _undo):
+        # Parse the <SOURCE MIDI> E-lines the way Reaper would.
+        ticks_per_second = 2.0 * 960.0  # 120 bpm, PPQ 960 (chunk embeds these)
+        tick = 0
+        open_notes: dict[int, tuple[int, int]] = {}  # pitch -> (start_tick, vel)
+        for line in str(chunk).splitlines():
+            parts = line.strip().split()
+            if len(parts) == 5 and parts[0] == "E":
+                delta, status, d1, d2 = parts[1], parts[2], parts[3], parts[4]
+                tick += int(delta)
+                st, pitch, vel = int(status, 16), int(d1, 16), int(d2, 16)
+                if 0x90 <= st <= 0x9F and vel > 0:
+                    open_notes[pitch] = (tick, vel)
+                elif 0x80 <= st <= 0x9F and pitch in open_notes:
+                    start_tick, note_vel = open_notes.pop(pitch)
+                    state.notes.append(
+                        (start_tick / ticks_per_second, tick / ticks_per_second,
+                         pitch, note_vel)
+                    )
+            elif len(parts) >= 2 and parts[0] == "LENGTH":
+                item["end"] = item.get("start", 0.0) + float(parts[1])
+        return True
+
     def MIDI_CountEvts(_take):
         return (True, len(state.notes), 0, 0)
 
@@ -179,6 +208,9 @@ def build_reaper_api(lua: LuaRuntime, state: State):
         "PCM_Source_CreateFromType": PCM_Source_CreateFromType,
         "SetMediaItemTake_Source": SetMediaItemTake_Source,
         "SetMediaTrackInfo_Value": SetMediaTrackInfo_Value,
+        "SetCurrentBPM": SetCurrentBPM,
+        "UpdateArrange": UpdateArrange,
+        "SetItemStateChunk": SetItemStateChunk,
         "MIDI_CountEvts": MIDI_CountEvts,
         "defer": defer,
         "MIDI_GetPPQPosFromProjTime": MIDI_GetPPQPosFromProjTime,
@@ -191,10 +223,12 @@ def build_reaper_api(lua: LuaRuntime, state: State):
     }
     import os
     if os.environ.get("FAKE_REAPER_STARTUP_API_GAP"):
-        # Mimic the startup gap seen on real hardware: this function is
-        # missing until the deferred phase — here, missing entirely, so
-        # the script must survive via its fallback ladder.
+        # Mimic the real-hardware gap: this function missing entirely;
+        # the chunk method must carry the job.
         del api["CreateNewMIDIItemInProject"]
+    if os.environ.get("FAKE_REAPER_NO_CHUNK_API"):
+        # Force the per-note API fallback branch.
+        del api["SetItemStateChunk"]
     return lua.table_from(api)
 
 

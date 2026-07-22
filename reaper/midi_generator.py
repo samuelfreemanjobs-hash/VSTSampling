@@ -126,6 +126,47 @@ def _seconds_to_ticks(seconds: float, bpm: float) -> int:
     return round(seconds * (bpm / 60.0) * PPQ)
 
 
+def build_item_chunk(plan: NotePlan, channel: int = 0) -> str:
+    """Render the note plan as a Reaper media-item state chunk.
+
+    SetItemStateChunk with this text creates a fully-formed MIDI item in
+    one call — no per-note API needed, works on every Reaper version.
+    IGNTEMPO pins the item to its own embedded tempo so note timing in
+    seconds is exact regardless of the project's default BPM.
+    """
+    if not 0 <= channel <= 15:
+        raise ValueError("channel must be 0..15")
+    ticks_per_second = (plan.bpm / 60.0) * PPQ
+
+    abs_events: list[tuple[int, int, int, int]] = []  # tick, prio, status, pitch, vel packed below
+    events: list[tuple[int, int, bytes]] = []
+    for e in plan.events:
+        on_tick = round(e.start_seconds * ticks_per_second)
+        off_tick = round((e.start_seconds + e.note_length_seconds) * ticks_per_second)
+        events.append((on_tick, 1, bytes([0x90 | channel, e.midi_note, e.velocity])))
+        events.append((off_tick, 0, bytes([0x80 | channel, e.midi_note, 0])))
+    events.sort(key=lambda t: (t[0], t[1]))
+
+    lines = [
+        "<ITEM",
+        "POSITION 0",
+        f"LENGTH {plan.total_seconds:.6f}",
+        "LOOP 0",
+        "<SOURCE MIDI",
+        f"HASDATA 1 {PPQ} QN",
+        f"IGNTEMPO 1 {plan.bpm:.8f} 4 4",
+    ]
+    last_tick = 0
+    for tick, _prio, msg in events:
+        delta = tick - last_tick
+        last_tick = tick
+        lines.append(f"E {delta} {msg[0]:02x} {msg[1]:02x} {msg[2]:02x}")
+    lines.append(f"E 0 {0xB0 | channel:02x} 7b 00")  # all notes off
+    lines.append(">")
+    lines.append(">")
+    return "\n".join(lines) + "\n"
+
+
 def write_midi_file(plan: NotePlan, path: Path, channel: int = 0) -> Path:
     """Write the note plan as a type-0 SMF."""
     if not 0 <= channel <= 15:

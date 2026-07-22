@@ -97,6 +97,33 @@ def test_smf_bytes_roundtrip(tmp_path: Path) -> None:
     assert note_ons == len(plan.events) == 4  # 2 notes x 2 velocities
 
 
+def test_item_chunk_format() -> None:
+    from reaper.midi_generator import build_item_chunk
+
+    plan = build_note_plan(
+        lowest_note=60, highest_note=63, interval_semitones=3, velocities=[100],
+        note_length_seconds=1.0, release_tail_seconds=0.5, gap_seconds=0.5,
+    )
+    chunk = build_item_chunk(plan)
+    lines = chunk.splitlines()
+    assert lines[0] == "<ITEM"
+    assert any(l.startswith("LENGTH ") for l in lines)
+    assert "<SOURCE MIDI" in lines
+    assert "HASDATA 1 960 QN" in lines
+    assert any(l.startswith("IGNTEMPO 1 120") for l in lines)
+
+    e_lines = [l for l in lines if l.startswith("E ")]
+    # 2 notes -> on+off each, plus the all-notes-off terminator
+    assert len(e_lines) == 5
+    # First note-on: delta 0, 0x90, C4 (0x3c), vel 100 (0x64)
+    assert e_lines[0] == "E 0 90 3c 64"
+    # Note-off after 1.0s at 120bpm/960ppq = 1920 ticks
+    assert e_lines[1] == "E 1920 80 3c 00"
+    # Second on after the 0.5 tail + 0.5 gap = 1.0s = 1920 ticks later
+    assert e_lines[2] == "E 1920 90 3f 64"
+    assert e_lines[-1] == "E 0 b0 7b 00"
+
+
 def test_slice_map_saved(tmp_path: Path) -> None:
     plan = build_note_plan(lowest_note=60, highest_note=60, velocities=[100])
     out = tmp_path / "render.slices.json"

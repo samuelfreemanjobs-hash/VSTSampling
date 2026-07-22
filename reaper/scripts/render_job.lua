@@ -102,47 +102,54 @@ local function main()
     end
   end
 
-  -- One MIDI item spanning the whole timeline; insert notes at exact
-  -- seconds. Fallback ladder because startup-run scripts have been seen
-  -- missing individual API functions.
+  -- Pin the project tempo to the chunk's embedded tempo so seconds map
+  -- exactly, whatever the user's default project template says.
+  if reaper.SetCurrentBPM then reaper.SetCurrentBPM(0, 120, false) end
+
+  -- Build the MIDI item. Primary method: stamp a complete item state
+  -- chunk written by Python — one call, works on every Reaper version,
+  -- cannot half-succeed. Fallback: per-note API insertion (observed
+  -- unreliable on some setups, kept as a last resort).
   local take
-  if reaper.CreateNewMIDIItemInProject then
+  local chunk_body = read_file(script_dir() .. "current_chunk.txt")
+  if chunk_body and reaper.AddMediaItemToTrack and reaper.SetItemStateChunk then
+    local item = reaper.AddMediaItemToTrack(track)
+    if not item then error("could not create media item", 0) end
+    local okc = reaper.SetItemStateChunk(item, chunk_body, false)
+    if not okc then error("SetItemStateChunk rejected the MIDI item chunk", 0) end
+    if reaper.UpdateArrange then reaper.UpdateArrange() end
+    take = reaper.GetActiveTake and reaper.GetActiveTake(item) or nil
+  elseif reaper.CreateNewMIDIItemInProject then
     local item = reaper.CreateNewMIDIItemInProject(track, 0, job.total_seconds, false)
     if not item then error("could not create MIDI item", 0) end
     take = reaper.GetActiveTake(item)
-  elseif reaper.AddMediaItemToTrack and reaper.PCM_Source_CreateFromType then
-    local item = reaper.AddMediaItemToTrack(track)
-    if not item then error("could not create media item (fallback)", 0) end
-    reaper.SetMediaItemPosition(item, 0, false)
-    reaper.SetMediaItemLength(item, job.total_seconds, false)
-    take = reaper.AddTakeToMediaItem(item)
-    local src = reaper.PCM_Source_CreateFromType("MIDI")
-    reaper.SetMediaItemTake_Source(take, src)
-  else
-    error("no MIDI item API available (CreateNewMIDIItemInProject missing)", 0)
-  end
-  if not take then error("could not get MIDI take", 0) end
-
-  local inserted = 0
-  for line in events_body:gmatch("[^\r\n]+") do
-    local s, e, note, vel = line:match("^([%d%.]+)\t([%d%.]+)\t(%d+)\t(%d+)$")
-    if s then
-      local ppq_s = reaper.MIDI_GetPPQPosFromProjTime(take, tonumber(s))
-      local ppq_e = reaper.MIDI_GetPPQPosFromProjTime(take, tonumber(e))
-      reaper.MIDI_InsertNote(take, false, false, ppq_s, ppq_e, 0,
-                             tonumber(note), tonumber(vel), true)
-      inserted = inserted + 1
+    if not take then error("could not get MIDI take", 0) end
+    local inserted = 0
+    for line in events_body:gmatch("[^\r\n]+") do
+      local s, e, note, vel = line:match("^([%d%.]+)\t([%d%.]+)\t(%d+)\t(%d+)$")
+      if s then
+        local ppq_s = reaper.MIDI_GetPPQPosFromProjTime(take, tonumber(s))
+        local ppq_e = reaper.MIDI_GetPPQPosFromProjTime(take, tonumber(e))
+        reaper.MIDI_InsertNote(take, false, false, ppq_s, ppq_e, 0,
+                               tonumber(note), tonumber(vel), true)
+        inserted = inserted + 1
+      end
     end
+    if inserted == 0 then error("no notes parsed from events file", 0) end
+    reaper.MIDI_Sort(take)
+  else
+    error("no way to create a MIDI item (chunk file or API missing)", 0)
   end
-  if inserted == 0 then error("no notes parsed from events file", 0) end
-  reaper.MIDI_Sort(take)
 
-  -- Verify the notes actually landed in the take — a take with a broken
-  -- source accepts InsertNote calls but stays empty, rendering silence.
-  if reaper.MIDI_CountEvts then
-    local _, notecnt = reaper.MIDI_CountEvts(take)
-    if (notecnt or 0) == 0 then
-      error("notes failed to insert into the MIDI take (0 events counted)", 0)
+  -- Verify events actually landed. Count defensively: docs say
+  -- (retval, notecnt, ...) but be robust to either slot holding it.
+  if take and reaper.MIDI_CountEvts then
+    local a, b = reaper.MIDI_CountEvts(take)
+    local cnt = 0
+    if type(b) == "number" and b > cnt then cnt = b end
+    if type(a) == "number" and a > cnt then cnt = a end
+    if cnt == 0 then
+      error("MIDI item created but 0 events counted — notes did not land", 0)
     end
   end
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core.logger import get_logger
-from reaper.midi_generator import NotePlan, write_midi_file
+from reaper.midi_generator import NotePlan, build_item_chunk, write_midi_file
 
 log = get_logger(__name__)
 
@@ -97,6 +97,8 @@ class ReaperController:
             for e in plan.events
         ]
         events_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        chunk_file = self.work_dir / "current_chunk.txt"
+        chunk_file.write_text(build_item_chunk(plan), encoding="utf-8")
         job_file = self.work_dir / "current_job.json"
         job_file.write_text(job.to_json(), encoding="utf-8")
         # The Lua script resolves job/events/result paths relative to its own
