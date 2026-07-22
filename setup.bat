@@ -20,9 +20,11 @@ echo Creating private Python environment (one-time)...
 python -m venv .venv
 call .venv\Scripts\activate.bat
 
-echo Installing libraries (this takes a few minutes)...
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+echo Installing libraries...
+echo (Leave this window alone - do not click inside it or press any keys.
+echo  If it looks frozen, it is just downloading. Give it time.)
+echo.
+pip install --default-timeout=120 --retries 10 --progress-bar off -r requirements.txt
 if errorlevel 1 (
     echo.
     echo  Something went wrong installing libraries. Scroll up for the red error

@@ -1,0 +1,4 @@
+# Only needed for development: running tests and building the .exe
+-r requirements.txt
+pytest>=8.0.0
+pyinstaller>=6.10.0
