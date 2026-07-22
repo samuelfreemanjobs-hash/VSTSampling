@@ -128,6 +128,12 @@ def build_reaper_api(lua: LuaRuntime, state: State):
     def defer(fn):
         fn()  # synchronous in the mock: "after startup" is now
 
+    def SetMediaTrackInfo_Value(_track, _param, _value):
+        return True
+
+    def MIDI_CountEvts(_take):
+        return (True, len(state.notes), 0, 0)
+
     def MIDI_GetPPQPosFromProjTime(_take, seconds):
         return float(seconds) * PPQ_PER_SECOND
 
@@ -172,6 +178,8 @@ def build_reaper_api(lua: LuaRuntime, state: State):
         "AddTakeToMediaItem": AddTakeToMediaItem,
         "PCM_Source_CreateFromType": PCM_Source_CreateFromType,
         "SetMediaItemTake_Source": SetMediaItemTake_Source,
+        "SetMediaTrackInfo_Value": SetMediaTrackInfo_Value,
+        "MIDI_CountEvts": MIDI_CountEvts,
         "defer": defer,
         "MIDI_GetPPQPosFromProjTime": MIDI_GetPPQPosFromProjTime,
         "MIDI_InsertNote": MIDI_InsertNote,

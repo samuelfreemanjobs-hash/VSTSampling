@@ -230,7 +230,23 @@ class PipelineRunner:
                     message=f"Processing {event.sample_name}",
                 )
             if not sample_rows:
-                raise RuntimeError("Every slice came back silent — check the plugin/preset")
+                import numpy as np
+                import soundfile as sf
+
+                raw, _sr = sf.read(str(render_wav), always_2d=True)
+                peak = float(np.max(np.abs(raw))) if raw.size else 0.0
+                if peak < 1e-6:
+                    raise RuntimeError(
+                        "Reaper rendered pure silence (render.wav peak = 0). The "
+                        "plugin loaded but produced no audio — usually track "
+                        "routing or the instrument needing UI interaction. "
+                        "render.wav kept for inspection."
+                    )
+                raise RuntimeError(
+                    f"render.wav has audio (peak {peak:.4f}) but every slice "
+                    "trimmed to silence — likely a timing misalignment between "
+                    "the render and the slice map. render.wav kept for inspection."
+                )
 
             # 4. Metadata + exports
             self.queue.update(job.id, progress=0.9, message="Exporting")

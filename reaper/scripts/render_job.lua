@@ -72,11 +72,16 @@ local function main()
   local events_body = read_file(script_dir() .. "current_events.txt")
   if not events_body then error("events file not found next to script", 0) end
 
-  -- Fresh project with one track
+  -- Fresh project with one track routed to master
   reaper.Main_OnCommand(40023, 0) -- File: New project
-  reaper.InsertTrackAtIndex(0, false)
+  reaper.InsertTrackAtIndex(0, true) -- true: with defaults (incl. master send)
   local track = reaper.GetTrack(0, 0)
   if not track then error("could not create track", 0) end
+  if reaper.SetMediaTrackInfo_Value then
+    reaper.SetMediaTrackInfo_Value(track, "B_MAINSEND", 1) -- force master send on
+    reaper.SetMediaTrackInfo_Value(track, "D_VOL", 1.0)    -- unity volume
+    reaper.SetMediaTrackInfo_Value(track, "B_MUTE", 0)
+  end
 
   -- Instrument: either a saved FX chain or plugin by name (+ preset)
   if job.fxchain and job.fxchain ~= "" then
@@ -131,6 +136,15 @@ local function main()
   end
   if inserted == 0 then error("no notes parsed from events file", 0) end
   reaper.MIDI_Sort(take)
+
+  -- Verify the notes actually landed in the take — a take with a broken
+  -- source accepts InsertNote calls but stays empty, rendering silence.
+  if reaper.MIDI_CountEvts then
+    local _, notecnt = reaper.MIDI_CountEvts(take)
+    if (notecnt or 0) == 0 then
+      error("notes failed to insert into the MIDI take (0 events counted)", 0)
+    end
+  end
 
   -- Render bounds = full timeline
   reaper.GetSet_LoopTimeRange(true, false, 0, job.total_seconds, false)
