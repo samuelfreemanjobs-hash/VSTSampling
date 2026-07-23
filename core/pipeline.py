@@ -42,6 +42,34 @@ def _plugin_folder(plugin: str) -> str:
     return _safe_name(name)
 
 
+def _instrument_type(plugin: str) -> str:
+    """Short instrument name for the program title: strips the host prefix
+    AND the vendor parenthetical. 'VSTi: JD-800 (Roland Cloud)' -> 'JD-800'."""
+    name = re.sub(r"^\w+:\s*", "", plugin)
+    name = re.sub(r"\s*\(\d+ out\)\s*$", "", name)
+    name = re.sub(r"\s*\([^)]*\)\s*$", "", name)  # drop trailing (vendor)
+    return _safe_name(name.strip())
+
+
+def program_name(template: str, plugin: str, preset: str, bank: str) -> str:
+    """Build the program/XPM name from a template.
+
+    Placeholders: {vsti} -> 'VSTi', {instrument} -> short plugin name,
+    {preset}, {bank}. Default template gives 'VSTi_JD-800_Warm Pad'.
+    """
+    values = {
+        "vsti": "VSTi",
+        "instrument": _instrument_type(plugin),
+        "preset": _safe_name(preset) if preset else "Default",
+        "bank": _safe_name(bank) if bank else "Default",
+    }
+    try:
+        name = template.format(**values)
+    except (KeyError, IndexError):
+        name = f"VSTi_{values['instrument']}_{values['preset']}"
+    return _safe_name(name)
+
+
 class PipelineRunner:
     def __init__(
         self,
@@ -135,6 +163,7 @@ class PipelineRunner:
             "probe_hold_seconds": cfg.get("audio.probe_hold_seconds", 6.0),
             "probe_tail_seconds": cfg.get("audio.probe_tail_seconds", 8.0),
             "resume": cfg.get("render.resume", True),
+            "program_template": cfg.get("naming.program_template", "VSTi_{instrument}_{preset}"),
         }
         s.update(job.settings_override or {})
         if s["mode"] == "drum":
@@ -298,19 +327,23 @@ class PipelineRunner:
                         "%s pitch off by %.2f semitones",
                         path.name, meta.get("pitch_error_semitones", 0.0),
                     )
+                dur = meta.get("duration_seconds") or 0.0
                 row = {
                     "file_path": str(path),
                     "midi_note": event.midi_note,
                     "velocity": event.velocity,
                     "round_robin": event.round_robin,
-                    "duration_seconds": meta.get("duration_seconds"),
+                    "duration_seconds": dur,
+                    "frames": int(round(dur * meta.get("sample_rate", s["sample_rate"]))),
                     "peak_db": meta.get("peak_db"),
                     "loop_start": meta.get("loop_start"),
                     "loop_end": meta.get("loop_end"),
                     "qc_passed": qc.passed and pitch_ok,
                 }
                 sample_rows.append(row)
-                self.db.add_sample(run_id, **row)
+                self.db.add_sample(
+                    run_id, **{k: v for k, v in row.items() if k != "frames"}
+                )
                 self.queue.update(
                     job.id,
                     progress=0.45 + 0.4 * (i + 1) / total,
@@ -345,14 +378,18 @@ class PipelineRunner:
                 samples=sample_rows,
                 settings={k: v for k, v in s.items() if k != "exporters"},
             )
+            prog_name = program_name(
+                s.get("program_template", "VSTi_{instrument}_{preset}"),
+                job.plugin, job.preset, job.bank,
+            )
             imap = build_instrument_map(
-                _safe_name(job.preset) if job.preset else _plugin_folder(job.plugin),
-                sample_rows,
-                drum_mode=s["mode"] == "drum",
+                prog_name, sample_rows, drum_mode=s["mode"] == "drum",
             )
             exporters_cfg = s["exporters"]
             if exporters_cfg.get("mpc_xpm"):
-                p = export_mpc_xpm(imap, out_dir / f"{imap.name}.xpm")
+                # MPC resolves SampleName against the .xpm's own folder, so
+                # the program MUST live beside the WAVs in Samples/.
+                p = export_mpc_xpm(imap, samples_dir / f"{imap.name}.xpm")
                 self.db.add_export(run_id, "mpc_xpm", str(p))
             if exporters_cfg.get("sfz"):
                 p = export_sfz(imap, out_dir / f"{imap.name}.sfz", samples_relative_to=out_dir)

@@ -28,6 +28,9 @@
         "worker_threads": 4,
         "resume_after_crash": true
     },
+    "naming": {
+        "program_template": "VSTi_{instrument}_{preset}"
+    },
     "exporters": {
         "mpc_xpm": true,
         "sfz": false,

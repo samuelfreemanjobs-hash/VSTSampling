@@ -83,6 +83,42 @@ These are on by default (in `settings.json` under `audio` / `render`):
   at preset 300 of 500 resumes instead of restarting. Delete the marker (or
   the preset folder) to force a re-render.
 
+## Program naming
+
+The MPC program (and the SFZ/DecentSampler files) are named from a
+template in `settings.json` under `naming.program_template`. Default:
+
+```
+"program_template": "VSTi_{instrument}_{preset}"
+```
+
+Placeholders: `{vsti}` → `VSTi`, `{instrument}` → the plugin name with the
+host prefix and vendor parenthetical stripped (e.g. `VSTi: JD-800 (Roland
+Cloud)` → `JD-800`), `{preset}`, `{bank}`. So a JD-800 patch called
+"Brass Section" becomes `VSTi_JD-800_Brass Section.xpm`.
+
+## MPC output layout (important)
+
+MPC finds each sample by its bare name in the folder the `.xpm` lives in.
+So the program is written **inside** the `Samples/` folder, next to the
+WAVs:
+
+```
+output/JD-800/Default/Brass Section/
+├── Samples/
+│   ├── VSTi_JD-800_Brass Section.xpm   <- open THIS in MPC
+│   ├── C1_v40.wav
+│   ├── C1_v127.wav
+│   └── …
+├── VSTi_JD-800_Brass Section.sfz        <- SFZ/DS reference Samples/
+├── VSTi_JD-800_Brass Section.dspreset
+└── instrument.json
+```
+
+Copy the whole `Samples/` folder to your MPC Live and open the `.xpm`
+from there. Keeping the xpm and WAVs together is what makes the samples
+map to the keys.
+
 ## First-time setup
 
 1. Install Python 3.11+, Reaper, and (for XPM validation) MPC Software.

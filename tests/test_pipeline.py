@@ -88,13 +88,15 @@ def test_full_pipeline(tmp_path: Path) -> None:
     assert meta["sample_count"] == 4
     assert (preset_dir / "samples.csv").exists()
 
-    # Exports
-    assert (preset_dir / "Warm Pad.xpm").exists()
-    assert (preset_dir / "Warm Pad.sfz").exists()
-    assert (preset_dir / "Warm Pad.dspreset").exists()
+    # Exports: program name is VSTi_{instrument}_{preset}; XPM lives in
+    # Samples/ next to the WAVs so MPC can resolve SampleName.
+    prog = "VSTi_FakeSynth_Warm Pad"
+    assert (preset_dir / "Samples" / f"{prog}.xpm").exists()
+    assert (preset_dir / f"{prog}.sfz").exists()
+    assert (preset_dir / f"{prog}.dspreset").exists()
 
     # SFZ references samples relative to the preset dir
-    sfz = (preset_dir / "Warm Pad.sfz").read_text()
+    sfz = (preset_dir / f"{prog}.sfz").read_text()
     assert "sample=Samples/C3_v60.wav" in sfz
 
     # DB state

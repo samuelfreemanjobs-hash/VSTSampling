@@ -23,6 +23,7 @@ class Zone:
     round_robin: int = 0
     loop_start: int | None = None
     loop_end: int | None = None
+    frames: int = 0  # sample length in frames (for MPC SliceEnd/loop)
 
     @property
     def has_loop(self) -> bool:
@@ -97,6 +98,7 @@ def build_instrument_map(
                 round_robin=int(s.get("round_robin", 0) or 0),
                 loop_start=None if drum_mode else s.get("loop_start"),
                 loop_end=None if drum_mode else s.get("loop_end"),
+                frames=int(s.get("frames", 0) or 0),
             )
         )
     zones.sort(key=lambda z: (z.root_note, z.low_vel, z.round_robin))

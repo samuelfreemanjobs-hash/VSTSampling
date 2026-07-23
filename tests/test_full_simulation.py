@@ -100,12 +100,19 @@ def test_complete_instrument_end_to_end(tmp_path: Path, fake_reaper_exe: Path) -
     velocities = {s["velocity"] for s in meta["samples"]}
     assert velocities == {60, 100, 127}
 
-    # XPM: 3 keygroups x 3 layers, valid XML
-    xpm = next(preset_dir.glob("*.xpm"))
+    # XPM: 3 keygroups, valid XML, lives IN the Samples folder beside WAVs
+    xpm = next((preset_dir / "Samples").glob("*.xpm"))
     program = ET.parse(str(xpm)).getroot().find("Program")
     assert program.findtext("KeygroupNumKeygroups") == "3"
+    assert len(program.find("PadNoteMap").findall("PadNote")) == 128
     instruments = program.find("Instruments").findall("Instrument")
-    assert all(len(i.find("Layers").findall("Layer")) == 3 for i in instruments)
+    # 4 layer slots each; 3 velocity layers populated
+    assert all(len(i.find("Layers").findall("Layer")) == 4 for i in instruments)
+    populated = [
+        l for l in instruments[0].find("Layers").findall("Layer")
+        if (l.findtext("SampleName") or "").strip()
+    ]
+    assert len(populated) == 3
 
     # SFZ + DecentSampler exist and reference real files
     sfz = next(preset_dir.glob("*.sfz")).read_text()

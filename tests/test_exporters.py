@@ -77,6 +77,13 @@ def test_decentsampler_output(tmp_path: Path) -> None:
     assert samples[0].get("rootNote") is not None
 
 
+def _populated_layers(inst) -> list:
+    return [
+        lyr for lyr in inst.find("Layers").findall("Layer")
+        if (lyr.findtext("SampleName") or "").strip()
+    ]
+
+
 def test_mpc_xpm_output(tmp_path: Path) -> None:
     imap = build_instrument_map("Keys", make_samples(vels=(40, 80, 100, 127)))
     out = export_mpc_xpm(imap, tmp_path / "Keys.xpm")
@@ -84,12 +91,21 @@ def test_mpc_xpm_output(tmp_path: Path) -> None:
     program = tree.getroot().find("Program")
     assert program is not None and program.get("type") == "Keygroup"
     assert program.findtext("KeygroupNumKeygroups") == "3"
+    # Required structural blocks that make MPC actually map samples
+    assert program.findtext("ProgramPads") and "ProgramPads" in program.findtext("ProgramPads")
+    assert len(program.find("PadNoteMap").findall("PadNote")) == 128
+    assert len(program.find("PadGroupMap").findall("PadGroup")) == 128
     instruments = program.find("Instruments").findall("Instrument")
     assert len(instruments) == 3
-    layers = instruments[0].find("Layers").findall("Layer")
-    assert len(layers) == 4
-    assert layers[0].findtext("VelStart") == "1"
-    assert layers[-1].findtext("VelEnd") == "127"
+    # Every instrument has exactly 4 layer slots (MPC requirement)
+    assert all(len(i.find("Layers").findall("Layer")) == 4 for i in instruments)
+    populated = _populated_layers(instruments[0])
+    assert len(populated) == 4  # 4 velocity layers filled
+    assert populated[0].findtext("VelStart") == "1"
+    assert populated[-1].findtext("VelEnd") == "127"
+    # Samples referenced by bare name, SampleFile empty
+    assert populated[0].findtext("SampleName")
+    assert (populated[0].findtext("SampleFile") or "") == ""
 
 
 def test_mpc_rejects_too_many_layers(tmp_path: Path) -> None:
@@ -104,7 +120,8 @@ def test_mpc_skips_round_robins(tmp_path: Path) -> None:
     tree = ET.parse(str(out))
     instruments = tree.getroot().find("Program").find("Instruments").findall("Instrument")
     for inst in instruments:
-        assert len(inst.find("Layers").findall("Layer")) == 2  # 2 vels, rr0 only
+        # 2 velocities populated (rr0 only), other 2 slots empty
+        assert len(_populated_layers(inst)) == 2
 
 
 def test_drum_mode_mapping_is_one_shot_and_pinned() -> None:

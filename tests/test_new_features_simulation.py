@@ -106,7 +106,7 @@ def test_drum_mode_one_shot_and_sparse(tmp_path: Path, fake_reaper_exe: Path) ->
     assert len(samples) == 5, [p.name for p in samples]
 
     # XPM: one-shot, ignore-base-note, 1-note-wide zones, NO loops
-    xpm = next(preset_dir.glob("*.xpm"))
+    xpm = next((preset_dir / "Samples").glob("*.xpm"))
     program = ET.parse(str(xpm)).getroot().find("Program")
     instruments = program.find("Instruments").findall("Instrument")
     assert len(instruments) == 5
