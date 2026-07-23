@@ -60,6 +60,29 @@ This costs one extra short render per preset but removes the guesswork of
 setting lengths by hand. Without it, lengths come from settings / the
 profile table below.
 
+## Quality & reliability options
+
+These are on by default (in `settings.json` under `audio` / `render`):
+
+- **Crossfade looping** (`audio.crossfade_loop`) — blends the loop seam with
+  an equal-power crossfade so a loop wraps without a click even when the two
+  ends don't naturally match. Normalization runs after the fade so levels
+  stay correct.
+- **Force loop** (`audio.force_loop`, off by default) — when strict loop
+  detection finds nothing, accept a lower-confidence loop and lean on the
+  crossfade. Turn this on for evolving pads you want looped no matter what;
+  leave off for one-shots and plucks that shouldn't loop.
+- **Pitch verification** (`audio.verify_pitch`) — detects each rendered
+  sample's fundamental and compares it to the intended note. A sample off by
+  more than half a semitone fails QC and is flagged in `instrument.json`
+  (`pitch_error_semitones`, `pitch_ok`). Octave-transposed patches are folded
+  out so they don't false-alarm; unpitched sources (drums) are skipped.
+- **Checkpoint / resume** (`render.resume`) — a finished preset writes a
+  `.complete.json` marker. Re-running the same queue skips presets that are
+  already done (marker + samples present), so an overnight batch that crashed
+  at preset 300 of 500 resumes instead of restarting. Delete the marker (or
+  the preset folder) to force a re-render.
+
 ## First-time setup
 
 1. Install Python 3.11+, Reaper, and (for XPM validation) MPC Software.
@@ -164,7 +187,9 @@ How this tool compares to the AutoSampler built into MPC Software:
 | Release tail capture | ✅ `release_tail_seconds`, or **auto** |
 | Auto keygroup program creation | ✅ MPC `.xpm` written directly |
 | Sample naming (note + velocity) | ✅ `C3_v100.wav` convention |
-| Loop detection | ✅ autocorrelation + zero-crossing snap (AutoSampler has none) |
+| Loop detection | ✅ autocorrelation + zero-crossing snap + crossfade seam (AutoSampler has none) |
+| Pitch QC | ✅ verifies each sample's rendered pitch (AutoSampler has none) |
+| Resume interrupted batch | ✅ checkpoint markers skip finished presets |
 | Round robins | ✅ SFZ / DecentSampler (MPC keygroups can't hold RR) |
 | Drum / one-shot programs | ✅ drum-kit mode |
 | Batch whole preset banks | ✅ preset scan + batch add (AutoSampler is one preset at a time) |

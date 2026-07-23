@@ -168,6 +168,37 @@ def test_auto_length_percussive_source(tmp_path: Path, fake_reaper_exe: Path) ->
     assert len(data) / sr < 2.0, "percussive sample should be short after auto-length"
 
 
+def test_resume_skips_completed_preset(tmp_path: Path, fake_reaper_exe: Path) -> None:
+    config = make_config(tmp_path, fake_reaper_exe)
+    job = Job(plugin="VSTi: ReaSynth (Cockos)", bank="B", preset="")
+    queue, _db = run_pipeline(config, [job], tmp_path)
+    preset_dir = tmp_path / "out" / "ReaSynth (Cockos)" / "B" / "Default"
+    assert (preset_dir / ".complete.json").exists()
+    render_wav = preset_dir / "render.wav"
+    first_mtime = render_wav.stat().st_mtime
+
+    # Re-queue the same preset; resume must skip re-rendering it
+    job2 = Job(plugin="VSTi: ReaSynth (Cockos)", bank="B", preset="")
+    queue2, _db2 = run_pipeline(config, [job2], tmp_path)
+    result = queue2.get(job2.id)
+    assert result.status == JobStatus.COMPLETED
+    assert "resumed" in result.message.lower()
+    # render.wav untouched -> no new render happened
+    assert render_wav.stat().st_mtime == first_mtime
+
+
+def test_pitch_verification_flags_wrong_octave_is_ok(
+    tmp_path: Path, fake_reaper_exe: Path
+) -> None:
+    # ReaSynth in the fake renders at the correct pitch; all samples pass.
+    config = make_config(tmp_path, fake_reaper_exe)
+    job = Job(plugin="VSTi: ReaSynth (Cockos)", preset="")
+    queue, db = run_pipeline(config, [job], tmp_path)
+    assert queue.get(job.id).status == JobStatus.COMPLETED
+    samples = db.samples_for_run(1)
+    assert all(s["qc_passed"] for s in samples)
+
+
 def test_auto_length_sustained_source(tmp_path: Path, fake_reaper_exe: Path) -> None:
     # ReaSynth sustains for the full hold; probe keeps a long note.
     config = make_config(tmp_path, fake_reaper_exe)

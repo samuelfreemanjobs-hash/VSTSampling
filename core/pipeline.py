@@ -125,12 +125,16 @@ class PipelineRunner:
             "normalize": cfg.get("audio.normalize", False),
             "normalize_target_db": cfg.get("audio.normalize_target_db", -3.0),
             "loop_detection": cfg.get("audio.loop_detection", True),
+            "crossfade_loop": cfg.get("audio.crossfade_loop", True),
+            "force_loop": cfg.get("audio.force_loop", False),
+            "verify_pitch": cfg.get("audio.verify_pitch", True),
             "exporters": cfg.get("exporters", {"mpc_xpm": True}),
             "fxchain": "",
             "mode": "keygroup",
             "auto_length": cfg.get("audio.auto_length", False),
             "probe_hold_seconds": cfg.get("audio.probe_hold_seconds", 6.0),
             "probe_tail_seconds": cfg.get("audio.probe_tail_seconds", 8.0),
+            "resume": cfg.get("render.resume", True),
         }
         s.update(job.settings_override or {})
         if s["mode"] == "drum":
@@ -188,6 +192,19 @@ class PipelineRunner:
             / _safe_name(job.preset or "Default")
         )
         samples_dir = out_dir / "Samples"
+
+        # Checkpoint/resume: a preset counts as done when its completion
+        # marker exists alongside a non-empty Samples folder. Lets an
+        # interrupted overnight batch skip finished presets on re-run.
+        done_marker = out_dir / ".complete.json"
+        if s.get("resume") and done_marker.exists() and any(samples_dir.glob("*.wav")):
+            log.info("Resume: %s already complete, skipping", job.display_name)
+            self.queue.update(
+                job.id, status=JobStatus.COMPLETED, progress=1.0, message="Already done (resumed)"
+            )
+            run_id = self.db.start_run(job.id, None, str(out_dir))
+            self.db.finish_run(run_id, "completed")
+            return run_id
 
         plugin_id = self.db.upsert_plugin(job.plugin)
         bank_id = self.db.upsert_bank(plugin_id, job.bank or "Default")
@@ -267,11 +284,20 @@ class PipelineRunner:
                     mono=s["channels"] == 1,
                     bit_depth=s["bit_depth"],
                     find_loop=s["loop_detection"],
+                    crossfade_loop=s.get("crossfade_loop", True),
+                    force_loop=s.get("force_loop", False),
+                    expected_note=event.midi_note if s.get("verify_pitch", True) else None,
                 )
                 if meta.get("silent"):
                     path.unlink(missing_ok=True)
                     continue
                 qc = qc_check(path)
+                pitch_ok = meta.get("pitch_ok", True)
+                if not pitch_ok:
+                    log.warning(
+                        "%s pitch off by %.2f semitones",
+                        path.name, meta.get("pitch_error_semitones", 0.0),
+                    )
                 row = {
                     "file_path": str(path),
                     "midi_note": event.midi_note,
@@ -281,7 +307,7 @@ class PipelineRunner:
                     "peak_db": meta.get("peak_db"),
                     "loop_start": meta.get("loop_start"),
                     "loop_end": meta.get("loop_end"),
-                    "qc_passed": qc.passed,
+                    "qc_passed": qc.passed and pitch_ok,
                 }
                 sample_rows.append(row)
                 self.db.add_sample(run_id, **row)
@@ -340,6 +366,13 @@ class PipelineRunner:
                 p = export_kontakt(imap, out_dir, samples_relative_to=out_dir)
                 self.db.add_export(run_id, "kontakt_sfz", str(p))
 
+            # Completion marker enables resume to skip this preset next run.
+            import json as _json
+
+            done_marker.write_text(
+                _json.dumps({"samples": len(sample_rows), "name": imap.name}),
+                encoding="utf-8",
+            )
             self.db.finish_run(run_id, "completed")
             self.queue.update(
                 job.id, status=JobStatus.COMPLETED, progress=1.0,

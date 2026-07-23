@@ -17,6 +17,9 @@
         "normalize": false,
         "normalize_target_db": -3.0,
         "loop_detection": true,
+        "crossfade_loop": true,
+        "force_loop": false,
+        "verify_pitch": true,
         "auto_length": false,
         "probe_hold_seconds": 6.0,
         "probe_tail_seconds": 8.0

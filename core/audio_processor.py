@@ -181,6 +181,37 @@ def detect_loop(
     return LoopPoints(start_frame=loop_start, end_frame=loop_end, correlation=best_corr)
 
 
+def apply_crossfade_loop(
+    data: np.ndarray,
+    loop: LoopPoints,
+    sr: int,
+    fade_seconds: float = 0.05,
+) -> np.ndarray:
+    """Blend the pre-loop-start audio into the loop end so the wrap is
+    seamless even when the two ends don't naturally match (evolving pads).
+
+    Equal-power crossfade: the tail leading up to loop_end is mixed with
+    the tail leading up to loop_start, so when playback jumps end->start
+    the waveform is continuous. Returns a new array; loop points unchanged.
+    """
+    fade = int(min(fade_seconds * sr, (loop.end_frame - loop.start_frame) / 2,
+                   loop.start_frame))
+    if fade < 8:
+        return data  # not enough room to fade; leave as-is
+    out = data.copy()
+    # Ramps (equal power) shaped for the sample's channel layout
+    t = np.linspace(0.0, np.pi / 2, fade)
+    fade_out = np.cos(t)  # weight for the loop-end audio
+    fade_in = np.sin(t)   # weight for the pre-start audio
+    if out.ndim == 2:
+        fade_out = fade_out[:, None]
+        fade_in = fade_in[:, None]
+    end_region = out[loop.end_frame - fade:loop.end_frame]
+    pre_start = out[loop.start_frame - fade:loop.start_frame]
+    out[loop.end_frame - fade:loop.end_frame] = end_region * fade_out + pre_start * fade_in
+    return out
+
+
 def _snap_to_zero_crossing(mono: np.ndarray, frame: int, window: int = 512) -> int:
     lo = max(1, frame - window)
     hi = min(len(mono) - 1, frame + window)
@@ -238,6 +269,69 @@ def analyze_decay(
 
     release = max(0.5, min(last_sound - hold_seconds + 0.3, max_tail_seconds))
     return DecayProfile(False, hold_seconds, round(release, 2))
+
+
+# -- pitch verification -----------------------------------------------
+
+
+def detect_fundamental_hz(data: np.ndarray, sr: int) -> float | None:
+    """Estimate the fundamental frequency via autocorrelation.
+
+    Returns None for signals with no clear pitch (noise, silence, drums).
+    Analyzes a stable mid-portion of the sample, past the attack transient.
+    """
+    mono = _to_mono_view(data).astype(np.float64)
+    if len(mono) < sr // 20:  # < 50 ms, too short to judge
+        return None
+    # Middle third: past attack, before release
+    lo, hi = len(mono) // 3, 2 * len(mono) // 3
+    seg = mono[lo:hi] if hi > lo else mono
+    seg = seg - seg.mean()
+    if np.max(np.abs(seg)) < 1e-6:
+        return None
+
+    corr = np.correlate(seg, seg, mode="full")[len(seg) - 1:]
+    if corr[0] <= 0:
+        return None
+    corr = corr / corr[0]
+
+    # Textbook autocorrelation pitch: skip the main lobe by finding the
+    # first point where correlation goes negative, THEN take the highest
+    # peak after it — that peak sits at the fundamental period. (Taking a
+    # raw global argmax locks onto tiny sub-period lags for pure tones.)
+    neg = np.flatnonzero(corr < 0)
+    if len(neg) == 0:
+        return None
+    search_from = neg[0]
+    max_lag = min(len(corr) - 1, int(sr / 20))   # floor 20 Hz
+    min_lag = max(search_from, int(sr / 5000))    # ceiling 5 kHz
+    if max_lag <= min_lag:
+        return None
+    window = corr[min_lag:max_lag]
+    peak = min_lag + int(np.argmax(window))
+    if corr[peak] < 0.3:
+        return None  # weak periodicity: unpitched
+    return sr / peak
+
+
+def hz_to_midi(freq: float) -> float:
+    return 69.0 + 12.0 * np.log2(freq / 440.0)
+
+
+def pitch_error_semitones(data: np.ndarray, sr: int, expected_note: int) -> float | None:
+    """Signed semitone error of the rendered pitch vs the expected note.
+
+    None when no clear pitch is found (correctly the case for drums, and
+    for pads with strong detuned/unison content). Folds octave errors out
+    so a synth patch voiced an octave down doesn't false-alarm."""
+    freq = detect_fundamental_hz(data, sr)
+    if freq is None:
+        return None
+    detected = hz_to_midi(freq)
+    err = detected - expected_note
+    # Fold to nearest octave: many patches are legitimately +/- octaves
+    err = err - 12.0 * round(err / 12.0)
+    return float(err)
 
 
 # -- QC ---------------------------------------------------------------
@@ -304,10 +398,19 @@ def process_sample_file(
     target_sample_rate: int | None = None,
     bit_depth: int = 24,
     find_loop: bool = False,
+    crossfade_loop: bool = True,
+    force_loop: bool = False,
+    expected_note: int | None = None,
 ) -> dict:
     """Apply the configured transforms to one WAV in place.
 
-    Returns a metadata dict (duration, peak, loop points if found).
+    find_loop: detect a sustain loop. crossfade_loop: blend the seam so
+    it wraps cleanly. force_loop: if strict detection fails, accept a
+    lower-confidence loop and rely on the crossfade (for evolving pads).
+    expected_note: if given, verify the rendered pitch and report the
+    semitone error in metadata.
+
+    Returns a metadata dict (duration, peak, loop points, pitch error).
     """
     data, sr = sf.read(str(path), always_2d=True)
 
@@ -324,10 +427,27 @@ def process_sample_file(
     if target_sample_rate and target_sample_rate != sr:
         data = resample(data, sr, target_sample_rate)
         sr = target_sample_rate
+
+    # Pitch verification before any loop edits touch the waveform
+    # (amplitude-independent, so order vs normalize doesn't matter)
+    pitch_err = (
+        pitch_error_semitones(data, sr, expected_note)
+        if expected_note is not None
+        else None
+    )
+
+    loop = None
+    if find_loop:
+        loop = detect_loop(data, sr)
+        if loop is None and force_loop:
+            loop = detect_loop(data, sr, correlation_threshold=0.55)
+        if loop is not None and crossfade_loop:
+            data = apply_crossfade_loop(data, loop, sr)
+
+    # Normalize LAST: a crossfade can sum in-phase regions above the
+    # pre-fade peak, so the target must be enforced after the seam edit.
     if normalize:
         data = normalize_peak(data, target_db=normalize_target_db)
-
-    loop = detect_loop(data, sr) if find_loop else None
 
     subtype = _SUBTYPES.get(bit_depth, "PCM_24")
     out = data if data.shape[1] > 1 else data[:, 0]
@@ -346,4 +466,7 @@ def process_sample_file(
         meta["loop_start"] = loop.start_frame
         meta["loop_end"] = loop.end_frame
         meta["loop_correlation"] = round(loop.correlation, 4)
+    if pitch_err is not None:
+        meta["pitch_error_semitones"] = round(pitch_err, 3)
+        meta["pitch_ok"] = abs(pitch_err) <= 0.5
     return meta

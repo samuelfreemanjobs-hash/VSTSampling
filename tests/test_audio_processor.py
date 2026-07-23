@@ -12,9 +12,12 @@ from core.audio_processor import (
     DecayProfile,
     LoopPoints,
     analyze_decay,
+    apply_crossfade_loop,
     db_to_amplitude,
+    detect_fundamental_hz,
     detect_loop,
     normalize_peak,
+    pitch_error_semitones,
     process_sample_file,
     qc_check,
     resample,
@@ -105,6 +108,53 @@ def test_qc_flags_clipping_and_quiet(tmp_path: Path) -> None:
     sf.write(str(p3), np.zeros(SR // 2), SR)
     r3 = qc_check(p3)
     assert r3.silent and not r3.passed
+
+
+def test_crossfade_loop_smooths_seam() -> None:
+    # Two different-amplitude halves so the seam has a discontinuity
+    sr = SR
+    a = 0.6 * np.sin(2 * np.pi * 200 * np.arange(sr) / sr)
+    b = 0.2 * np.sin(2 * np.pi * 200 * np.arange(sr) / sr + 1.0)
+    signal = np.concatenate([a, b])[:, None]
+    loop = LoopPoints(start_frame=sr // 2, end_frame=sr + sr // 2, correlation=0.6)
+    faded = apply_crossfade_loop(signal, loop, sr, fade_seconds=0.05)
+    # Discontinuity at the wrap = |value just before loop_end - value at loop_start|
+    seam_before = abs(faded[loop.end_frame - 1, 0] - signal[loop.start_frame, 0])
+    raw_before = abs(signal[loop.end_frame - 1, 0] - signal[loop.start_frame, 0])
+    assert seam_before < raw_before  # crossfade reduced the jump
+    assert faded.shape == signal.shape
+
+
+def test_detect_fundamental_and_pitch_error() -> None:
+    # A4 = 440 Hz should map to MIDI note 69 with ~0 error
+    sr = SR
+    t = np.arange(2 * sr) / sr
+    signal = 0.5 * np.sin(2 * np.pi * 440 * t)[:, None]
+    freq = detect_fundamental_hz(signal, sr)
+    assert freq is not None
+    assert abs(freq - 440) < 5
+
+    assert abs(pitch_error_semitones(signal, sr, 69)) < 0.2
+    # A tone a semitone sharp of the expected note reads ~+1.0
+    sharp = 0.5 * np.sin(2 * np.pi * 466.16 * t)[:, None]  # A#4
+    err = pitch_error_semitones(sharp, sr, 69)
+    assert 0.7 < err < 1.3
+
+
+def test_pitch_error_folds_octaves() -> None:
+    # Patch voiced an octave down should NOT flag as an error
+    sr = SR
+    t = np.arange(2 * sr) / sr
+    down_oct = 0.5 * np.sin(2 * np.pi * 220 * t)[:, None]  # A3
+    err = pitch_error_semitones(down_oct, sr, 69)  # expected A4
+    assert err is not None
+    assert abs(err) < 0.2
+
+
+def test_pitch_none_for_noise() -> None:
+    rng = np.random.default_rng(3)
+    noise = (rng.standard_normal(SR) * 0.3)[:, None]
+    assert pitch_error_semitones(noise, SR, 60) is None
 
 
 def test_analyze_decay_percussive(tmp_path: Path) -> None:
